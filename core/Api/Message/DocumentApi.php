@@ -1,0 +1,229 @@
+<?php
+
+namespace ICT\Core\Api\Message;
+
+/* * ***************************************************************
+ * Copyright © 2026 ICT Innovations Pakistan All Rights Reserved   *
+ * Developed By: Nasir Iqbal                                       *
+ * Website : http://www.ictinnovations.com/                        *
+ * Mail : support@ictinnovations.com                                 *
+ * *************************************************************** */
+
+use ICT\Core\Api;
+use ICT\Core\CoreException;
+use ICT\Core\Corelog;
+use ICT\Core\DB;
+use ICT\Core\User;
+use ICT\Core\Activity;
+use ICT\Core\Session;
+use ICT\Core\Transmission;
+use ICT\Core\Message\Document;
+use SplFileInfo;
+
+#[\AllowDynamicProperties]
+class DocumentApi extends Api
+{
+
+  /**
+   * Create a new document
+   *
+   * @url POST /documents
+   * @url POST /messages/documents
+   */
+  public function create($data = array())
+  {
+    $this->_authorize('document_create');
+
+    $oDocument = new Document();
+    unset($data['file_name']);
+    $this->set($oDocument, $data);
+
+    if ($oDocument->save()) {
+      return $oDocument->document_id;
+    } else {
+      throw new CoreException(417, 'Document creation failed');
+    }
+  }
+
+  /**
+   * List all available documents
+   *
+   * @url GET /documents
+   * @url GET /messages/documents
+   */
+  public function list_view($query = array())
+  {
+    $this->_authorize('document_list');
+    $filter  = (array)$query;
+    $filter = array_merge($this->_authorization_filter(), $filter);
+    return Document::search($filter);
+  }
+
+  /**
+   * Gets the document by id
+   *
+   * @url GET /documents/$document_id
+   * @url GET /messages/documents/$document_id
+   */
+  public function read($document_id)
+  {
+    $this->_authorize('document_read');
+
+    $oDocument = new Document($document_id);
+    if ($this->_authorization_filter($oDocument)) {
+      return $oDocument;
+    }
+  }
+
+  /**
+   * Upload document file by id
+   *
+   * @url PUT /documents/$document_id/media
+   * @url PUT /messages/documents/$document_id/media
+   *
+   * Upload multiple (one by one) document files by id
+   * @url POST /documents/$document_id/media
+   * @url POST /messages/documents/$document_id/media
+   */
+  public function upload($document_id, $data = null, $mime = 'application/pdf')
+  {
+    $this->_authorize('document_create');
+    $oDocument = new Document($document_id);
+    if (!empty($data)) {
+      if (in_array($mime, Document::$media_supported)) {
+        $extension = array_search($mime, Document::$media_supported);
+        $filename = tempnam('/tmp', 'document') . ".$extension";
+        file_put_contents($filename, $data);
+        if ($this->get_request_method() == 'POST') { // if request is post then append, to support multiple files
+          $type = pathinfo($filename, PATHINFO_EXTENSION);
+          $filename = $oDocument->create_pdf($filename, $type);
+          $merged_filename = $oDocument->file_name;
+          if ($oDocument->file_name) {
+            $merged_filename = $oDocument->create_pdf($oDocument->file_name, 'aes');
+          }
+          $filename = \ICT\Core\path_append($merged_filename, $filename);
+        }
+        $oDocument->file_name = $filename;
+        if ($oDocument->save()) {
+          return $oDocument->document_id;
+        } else {
+          throw new CoreException(417, 'Document media upload failed');
+        }
+      } else {
+        throw new CoreException(415, 'Document media upload failed, invalid file type');
+      }
+    } else {
+      throw new CoreException(411, 'Document media upload failed, no file uploaded');
+    }
+  }
+
+  /**
+   * Download document by id
+   * @url GET /documents/$document_id/media
+   * @url GET /documents/$document_id/$user_id/media
+   * @url GET /documents/$document_id/media/$transmission_id
+   * @url GET /messages/documents/$document_id/media
+   */
+  public function download($document_id, $transmission_id = NULL, $query = array())
+  {
+    $oDocument = new Document($document_id);
+    Corelog::log("Document media / download requested :$oDocument->file_name", Corelog::CRUD);
+    if (isset($query['format']) && $query['format'] == 'jpg') {
+      $page_no     = isset($query['page']) ? $query['page'] : 1;
+      $output_file = $oDocument->create_jpg($oDocument->file_name, $page_no);
+    } else {
+      // $output_file = $oDocument->create_pdf($oDocument->file_name, 'tif');
+      $output_file = $oDocument->create_pdf($oDocument->file_name, 'aes');
+    }
+    if (file_exists($output_file)) {
+      $oFile = new SplFileInfo($output_file);
+      $currentuser = Session::get_instance()->user->username;
+      $currentuserid = Session::get_instance()->user->user_id;
+      $activity = new Activity();
+      if ($transmission_id) {
+        $activity->faxactivity("Downloaded/View By $currentuser", $transmission_id);
+        $transmission = new Transmission($transmission_id);
+        $title = $transmission->title;
+        $activity->userlogs("Download/View Fax $title");
+      } else {
+        $activity->userlogs("Download/View Document ID:[$document_id]");
+      }
+
+      return $oFile;
+    } else {
+      throw new CoreException(404, 'Document media not found');
+    }
+  }
+
+  /**
+   * Download document by id
+   * @noAuth
+   * @url GET /documents_view/$document_id/media
+   */
+
+  public function view_desktop($document_id)
+  {
+    $oDocument = new Document($document_id, 1);
+    Corelog::log("Document media / download requested :$oDocument->file_name", Corelog::CRUD);
+    $output_file = $oDocument->create_pdf($oDocument->file_name, 'tif');
+    if (file_exists($output_file)) {
+      $oFile = new SplFileInfo($output_file);
+      $file_path = $oFile->getPathname();
+      $file_content = file_get_contents($file_path);
+      $base64 = base64_encode($file_content);
+
+      if (file_exists($file_content)) {
+        header('Content-Type: application/pdf');
+        header('Content-Disposition: attachment; filename="' . basename($file_path) . '"');
+      }
+      return $base64;
+    } else {
+      throw new CoreException(404, 'Document media not found');
+    }
+  }
+
+
+  /**
+   * Update existing document
+   *
+   * @url PUT /documents/$document_id
+   * @url PUT /messages/documents/$document_id
+   */
+  public function update($document_id, $data = array())
+  {
+    $this->_authorize('document_update');
+
+    $oDocument = new Document($document_id);
+    if ($this->_authorization_filter($oDocument)) {
+      unset($data['file_name']);
+      $this->set($oDocument, $data);
+
+      if ($oDocument->save()) {
+        return $oDocument;
+      } else {
+        throw new CoreException(417, 'Document update failed');
+      }
+    }
+  }
+
+  /**
+   * Create a new document
+   *
+   * @url DELETE /documents/$document_id
+   * @url DELETE /messages/documents/$document_id
+   */
+  public function remove($document_id)
+  {
+    $this->_authorize('document_delete');
+
+    $oDocument = new Document($document_id);
+    if ($this->_authorization_filter($oDocument)) {
+      $result = $oDocument->delete();
+      if ($result) {
+        return $result;
+      } else {
+        throw new CoreException(417, 'Document delete failed');
+      }
+    }
+  }
+}
