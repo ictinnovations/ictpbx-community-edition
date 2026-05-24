@@ -424,8 +424,32 @@ fi
 # is NOT opened in the firewall — all WebSocket traffic goes through port 80/443.
 FS_INTERNAL=/etc/freeswitch/sip_profiles/internal.xml
 if [[ -f "$FS_INTERNAL" ]]; then
+    # Enable plain WebSocket binding for JsSIP softphone (proxied via Apache /ws/)
     sed -i 's|value=":5066" enabled="false"|value=":5066" enabled="true"|g' "$FS_INTERNAL"
     ok "WebSocket binding :5066 enabled in $FS_INTERNAL (proxied via Apache, not exposed externally)"
+
+    # Route WebRTC/JsSIP calls through the ictcore dialplan context
+    if grep -q 'context.*default' "$FS_INTERNAL"; then
+        sed -i 's|<param name="context" value="default"/>|<param name="context" value="ictcore"/>|' "$FS_INTERNAL"
+        ok "internal.xml: context set to ictcore"
+    fi
+
+    # force-register-domain: ensures sofia_contact() lookups match the registration
+    # domain used by JsSIP clients; without this all sofia_contact() calls return empty
+    if grep -q 'force-register-domain' "$FS_INTERNAL"; then
+        sed -i 's|<param name="force-register-domain" value="[^"]*"/>|<param name="force-register-domain" value="$${local_ip_v4}"/>|' "$FS_INTERNAL"
+    else
+        sed -i 's|</settings>|  <param name="force-register-domain" value="$${local_ip_v4}"/>\n</settings>|' "$FS_INTERNAL"
+    fi
+    ok "internal.xml: force-register-domain set to \$\${local_ip_v4}"
+
+    # Disable session timers: JsSIP omits Session-Expires; FS rejects INVITEs with 422
+    if ! grep -q 'enable-timer' "$FS_INTERNAL"; then
+        sed -i 's|</settings>|  <param name="enable-timer" value="false"/>\n</settings>|' "$FS_INTERNAL"
+        ok "internal.xml: enable-timer disabled (JsSIP/WebRTC compatibility)"
+    else
+        ok "internal.xml: enable-timer already set"
+    fi
 fi
 
 # Reload FreeSWITCH XML so the internal profile picks up the certificate and starts.
@@ -471,6 +495,20 @@ fi
 
 chown -R apache:apache "$FUSIONPBX_DIR"
 ok "Ownership set: apache:apache"
+
+# mod_lua symlink: FreeSWITCH looks for app.lua in $${script_dir} which is
+# /usr/share/freeswitch/scripts (empty after RPM install). Without this symlink
+# every SIP transaction logs [ERR] cannot open app.lua — FusionPBX XML handler
+# never fires and FS falls back to static XML only.
+FPBX_SCRIPTS="${FUSIONPBX_DIR}/app/switch/resources/scripts"
+FS_SCRIPTS=/usr/share/freeswitch/scripts
+if [[ -d "$FPBX_SCRIPTS" ]]; then
+    rm -rf "$FS_SCRIPTS"
+    ln -sfn "$FPBX_SCRIPTS" "$FS_SCRIPTS"
+    ok "mod_lua symlink: $FS_SCRIPTS → $FPBX_SCRIPTS"
+else
+    warn "FusionPBX scripts dir not found at $FPBX_SCRIPTS — skipping mod_lua symlink"
+fi
 
 # Create /etc/fusionpbx/config.conf (required by FusionPBX and FpbxDomain.php)
 info "Writing /etc/fusionpbx/config.conf..."
@@ -603,6 +641,16 @@ ln -sf "$ICTCORE_DIR/etc/freeswitch/sip_profiles/ictcore.xml" /etc/freeswitch/si
 ln -sf "$ICTCORE_DIR/etc/freeswitch/directory/ictcore.xml"    /etc/freeswitch/directory/ictcore.xml
 ok "FreeSWITCH config symlinks created"
 
+# ictpbx.xml dial-string fixes for WebRTC/JsSIP compatibility:
+#   1. Remove ,${verto_contact(...)} — mod_verto not loaded; causes bridge errors
+#   2. Fix *\/ → */ in sofia_contact() — backslash makes contact lookup always fail
+ICTPBX_XML="$ICTCORE_DIR/etc/freeswitch/directory/ictpbx.xml"
+if [[ -f "$ICTPBX_XML" ]]; then
+    sed -i 's|,\${verto_contact([^)]*)}||g' "$ICTPBX_XML"
+    sed -i 's|\*\\/|*/|g' "$ICTPBX_XML"
+    ok "ictpbx.xml: verto_contact removed, sofia_contact dial-string normalised"
+fi
+
 # Composer dependencies
 if [[ -f "$ICTCORE_DIR/composer.json" ]]; then
     if ! [[ -x /usr/local/bin/composer ]]; then
@@ -649,6 +697,7 @@ SCHEMA_FILES=(
     provider_fpbx_gateway_uuid.sql
     route_fpbx_dialplan_uuid.sql
     cdr_enriched_columns.sql
+    extension_config.sql
 )
 
 # Idempotent: skip if base schema already loaded (account table is from database.sql).

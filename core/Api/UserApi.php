@@ -229,8 +229,15 @@ class UserApi extends Api
   public function remove($user_id)
   {
     $this->_authorize('user_delete');
+
+    if ((int)$user_id === 1) {
+      throw new CoreException(403, 'The system admin account cannot be deleted.');
+    }
+    if ((int)$user_id === (int)$this->oUser->user_id) {
+      throw new CoreException(403, 'You cannot delete your own account.');
+    }
+
     $oUser = new User($user_id);
-    $oUser->load();
 
     // Block deletion of super admin accounts
     if (\ICT\Core\can_access('super_admin', $user_id)) {
