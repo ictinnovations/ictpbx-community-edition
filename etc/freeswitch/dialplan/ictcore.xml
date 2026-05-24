@@ -4,6 +4,16 @@
 <include>
   <!-- inbound calls / DID -->
   <context name="ictcore">
+    <!-- bridge direct extension-to-extension calls for registered WebRTC/SIP users -->
+    <!-- outer condition matches short numeric destinations (4-6 digits)            -->
+    <!-- inner condition checks a live sofia registration exists before bridging     -->
+    <extension name="local_ext_bridge" continue="false">
+      <condition field="destination_number" expression="^(\d{4,6})$">
+        <condition field="${sofia_contact(*/$1@$${local_ip_v4})}" expression="^sip:">
+          <action application="bridge" data="user/$1@$${local_ip_v4}"/>
+        </condition>
+      </condition>
+    </extension>
     <extension name="application_inbound">
       <condition field="destination_number" expression="^\+?(\d+)$">
         <action application="lua" data="/usr/ictcore/bin/freeswitch/application.lua 0 inbound success" />

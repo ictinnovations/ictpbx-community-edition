@@ -36,12 +36,19 @@ class FpbxExtensionApi extends Api
         $row['assigned_account_id'] = $acct ? (int)$acct['account_id'] : null;
         $row['assigned_to']         = $acct ? $acct['username'] : null;
         $row['fax_email']           = $acct ? $acct['email'] : null;
+        // Also enrich extension_type from extension_config
+        $ec_res = \ICT\Core\DB::query('extension_config',
+          "SELECT extension_type FROM extension_config WHERE extension_uuid = '%uuid%'",
+          ['uuid' => $row['extension_uuid'] ?? '']);
+        $ec_row = mysqli_fetch_assoc($ec_res);
+        $row['extension_type'] = $ec_row ? ($ec_row['extension_type'] ?: 'voice') : 'voice';
         $row['linked_user_id']      = $acct ? ($acct['created_by'] > 0 ? (int)$acct['created_by'] : null) : null;
         $row['linked_username']     = $acct ? $acct['linked_username'] : null;
       } else {
         $row['assigned_account_id'] = null;
         $row['assigned_to']         = null;
         $row['fax_email']           = null;
+        $row['extension_type']      = 'voice';
         $row['linked_user_id']      = null;
         $row['linked_username']     = null;
       }

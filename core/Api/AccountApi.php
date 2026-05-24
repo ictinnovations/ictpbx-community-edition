@@ -149,6 +149,18 @@ class AccountApi extends Api
             $oAccount->pbx_forward_busy_destination        = $pbx['forward_busy_destination'];
             $oAccount->pbx_forward_no_answer_enabled       = $pbx['forward_no_answer_enabled'] === 't';
             $oAccount->pbx_forward_no_answer_destination   = $pbx['forward_no_answer_destination'];
+            // Load extension_type from MariaDB extension_config
+            try {
+              $ec = \ICT\Core\DB::query('extension_config',
+                "SELECT extension_type, fax_email FROM extension_config WHERE extension_uuid = '%uuid%'",
+                ['uuid' => $pbx['extension_uuid']]);
+              $ec_row = mysqli_fetch_assoc($ec);
+              $oAccount->pbx_extension_type = $ec_row ? ($ec_row['extension_type'] ?: 'voice') : 'voice';
+              $oAccount->pbx_fax_email      = $ec_row ? ($ec_row['fax_email'] ?: '') : '';
+            } catch (\Exception $e2) {
+              $oAccount->pbx_extension_type = 'voice';
+              $oAccount->pbx_fax_email      = '';
+            }
           }
         }
       } catch (\Exception $e) {}

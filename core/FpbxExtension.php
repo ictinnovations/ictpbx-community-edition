@@ -53,6 +53,7 @@ class FpbxExtension
 
   // Fax account (auto-provisioned in ICTCore MariaDB)
   public $fax_email                               = null;
+  public $extension_type                          = 'voice';
 
   // User assignment — transient, accepted from API, not stored in PG
   public $user_id                                 = null;
@@ -88,6 +89,14 @@ class FpbxExtension
         ['phone' => $this->extension]);
       $acct = mysqli_fetch_assoc($res);
       $this->linked_user_id = ($acct && !empty($acct['created_by'])) ? (int)$acct['created_by'] : null;
+    }
+    // Load extension_type from extension_config (MariaDB companion table)
+    $cfg = \ICT\Core\DB::query('extension_config',
+      "SELECT extension_type, fax_email FROM extension_config WHERE extension_uuid = '%uuid%'",
+      ['uuid' => $this->extension_uuid]);
+    if ($row = mysqli_fetch_assoc($cfg)) {
+      $this->extension_type = $row['extension_type'];
+      if (!empty($row['fax_email'])) $this->fax_email = $row['fax_email'];
     }
   }
 
@@ -202,6 +211,22 @@ class FpbxExtension
 
     $this->sync_ictcore_account();
 
+    // Upsert extension_type into extension_config
+    $ec_tid = $this->tenant_id;
+    if (!$ec_tid && $this->domain_uuid) {
+      $ec_r  = \ICT\Core\DB::query('account', "SELECT tenant_id FROM tenant WHERE fpbx_domain_uuid = '%uuid%'", ['uuid' => $this->domain_uuid]);
+      $ec_tr = mysqli_fetch_assoc($ec_r);
+      $ec_tid = $ec_tr ? (int)$ec_tr['tenant_id'] : 0;
+    }
+    \ICT\Core\DB::query('extension_config',
+      "INSERT INTO extension_config (extension_uuid, tenant_id, extension_type, fax_email)
+       VALUES ('%uuid%', %tid%, '%type%', '%email%')
+       ON DUPLICATE KEY UPDATE extension_type='%type%', fax_email='%email%'",
+      ['uuid'  => $this->extension_uuid,
+       'tid'   => (int)$ec_tid,
+       'type'  => $this->extension_type ?: 'voice',
+       'email' => $this->fax_email ?? '']);
+
     return $this->extension_uuid;
   }
 
@@ -225,9 +250,16 @@ class FpbxExtension
         "DELETE FROM account WHERE account_id = %id%",
         ['id' => $acct['account_id']]);
     }
+    \ICT\Core\DB::query('extension_config',
+      "DELETE FROM extension_config WHERE extension_uuid = '%uuid%'",
+      ['uuid' => $this->extension_uuid]);
     $pdo = FpbxDomain::fpbx_db();
     $pdo->prepare("DELETE FROM v_extensions WHERE extension_uuid = :uuid")
         ->execute(['uuid' => $this->extension_uuid]);
+
+    // Reload FS XML so the deleted extension is no longer served from the directory
+    try { \ICT\Core\Realtime::run_cmd('reloadxml'); } catch (\Throwable $e) { /* non-fatal */ }
+
     return true;
   }
 

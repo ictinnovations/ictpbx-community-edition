@@ -339,8 +339,8 @@ class User
     if (!empty($aWhere)) {
       $from_str .= ' WHERE ' . implode(' AND ', $aWhere);
     }
-    $query = "SELECT u.usr_id AS user_id,u.tenant_id,u.username,u.first_name,u.active_desc,u.last_name,u.phone,u.email,u.credit,u.dashboard_cards,u.user_permission,u.status,u.daily_limit,u.monthly_limit,u.daily_sent,u.monthly_sent,u.quota_ring_groups,u.quota_call_queues,u.quota_voicemail,u.quota_conference,u.quota_music_on_hold,u.quota_extensions,u.quota_devices,u.quota_ivr_menus,t.company,u.active,u.date_created,u.last_updated,u.pass_exp_in,u.email_send,SUM(CASE WHEN tr.origin = 'sendfax' THEN 1 ELSE 0 END) AS total_send,SUM(CASE WHEN tr.direction = 'inbound' THEN 1 ELSE 0 END) AS total_inbound,COALESCE(r.roles, '') AS roles FROM usr u LEFT JOIN tenant t ON t.tenant_id = u.tenant_id LEFT JOIN transmission tr ON tr.created_by = u.usr_id LEFT JOIN ( SELECT ur.usr_id, GROUP_CONCAT(DISTINCT r.name ORDER BY r.name SEPARATOR ', ') AS roles FROM user_role ur JOIN role r ON r.role_id = ur.role_id GROUP BY ur.usr_id) r ON r.usr_id = u.usr_id $from_str
-    GROUP BY u.usr_id, u.tenant_id, u.username, u.first_name, u.last_name,u.phone, u.email, u.credit, u.dashboard_cards,u.daily_limit, u.monthly_limit, u.daily_sent,u.monthly_sent,u.quota_ring_groups,u.quota_call_queues,u.quota_voicemail,u.quota_conference,u.quota_music_on_hold,u.quota_extensions,u.quota_devices,u.quota_ivr_menus, t.company ORDER BY u.usr_id DESC $limitSql";
+    $query = "SELECT u.usr_id AS user_id,u.tenant_id,u.username,u.first_name,u.active_desc,u.last_name,u.phone,u.email,COALESCE(t.credit, 0) AS credit,u.dashboard_cards,u.user_permission,u.status,u.daily_limit,u.monthly_limit,u.daily_sent,u.monthly_sent,u.quota_ring_groups,u.quota_call_queues,u.quota_voicemail,u.quota_conference,u.quota_music_on_hold,u.quota_extensions,u.quota_devices,u.quota_ivr_menus,t.company,u.active,u.date_created,u.last_updated,u.pass_exp_in,u.email_send,SUM(CASE WHEN tr.origin = 'sendfax' THEN 1 ELSE 0 END) AS total_send,SUM(CASE WHEN tr.direction = 'inbound' THEN 1 ELSE 0 END) AS total_inbound,COALESCE(r.roles, '') AS roles FROM usr u LEFT JOIN tenant t ON t.tenant_id = u.tenant_id LEFT JOIN transmission tr ON tr.created_by = u.usr_id LEFT JOIN ( SELECT ur.usr_id, GROUP_CONCAT(DISTINCT r.name ORDER BY r.name SEPARATOR ', ') AS roles FROM user_role ur JOIN role r ON r.role_id = ur.role_id GROUP BY ur.usr_id) r ON r.usr_id = u.usr_id $from_str
+    GROUP BY u.usr_id, u.tenant_id, u.username, u.first_name, u.last_name,u.phone, u.email, u.dashboard_cards,u.daily_limit, u.monthly_limit, u.daily_sent,u.monthly_sent,u.quota_ring_groups,u.quota_call_queues,u.quota_voicemail,u.quota_conference,u.quota_music_on_hold,u.quota_extensions,u.quota_devices,u.quota_ivr_menus, t.company ORDER BY u.usr_id DESC $limitSql";
 
     if ($totalrows) return totalrows($query);
     Corelog::log("user search with $query", Corelog::DEBUG, array('aFilter' => $aFilter));
@@ -420,12 +420,12 @@ class User
       $from_str .= ' WHERE ' . implode(' AND ', $aWhere);
     }
 
-    $query = " SELECT u.usr_id AS user_id, u.tenant_id, u.username, u.first_name, u.last_name, u.phone, u.email, u.credit, u.dashboard_cards, u.daily_limit, u.monthly_limit, u.daily_sent, u.monthly_sent, u.quota_ring_groups, u.quota_call_queues, u.quota_voicemail, u.quota_conference, u.quota_music_on_hold, u.quota_extensions, u.quota_devices, u.quota_ivr_menus, t.company,u.active,
+    $query = " SELECT u.usr_id AS user_id, u.tenant_id, u.username, u.first_name, u.last_name, u.phone, u.email, COALESCE(t.credit, 0) AS credit, u.dashboard_cards, u.daily_limit, u.monthly_limit, u.daily_sent, u.monthly_sent, u.quota_ring_groups, u.quota_call_queues, u.quota_voicemail, u.quota_conference, u.quota_music_on_hold, u.quota_extensions, u.quota_devices, u.quota_ivr_menus, t.company,u.active,
     SUM(CASE WHEN tr.origin = 'sendfax' THEN 1 ELSE 0 END) AS total_send,
     SUM(CASE WHEN tr.direction = 'inbound' THEN 1 ELSE 0 END) AS total_inbound,
     (SELECT GROUP_CONCAT(r.name) FROM user_role ur JOIN role r ON ur.role_id = r.role_id WHERE ur.usr_id = u.usr_id) AS roles
     FROM usr u LEFT JOIN tenant t ON t.tenant_id = u.tenant_id LEFT JOIN transmission tr ON tr.created_by = u.usr_id " . $from_str . "
-    GROUP BY u.usr_id, u.tenant_id, u.username, u.first_name, u.last_name, u.phone, u.email, u.credit, u.dashboard_cards, u.daily_limit, u.monthly_limit, u.daily_sent, u.monthly_sent, u.quota_ring_groups, u.quota_call_queues, u.quota_voicemail, u.quota_conference, u.quota_music_on_hold, u.quota_extensions, u.quota_devices, u.quota_ivr_menus, t.company";
+    GROUP BY u.usr_id, u.tenant_id, u.username, u.first_name, u.last_name, u.phone, u.email, COALESCE(t.credit, 0) AS credit, u.dashboard_cards, u.daily_limit, u.monthly_limit, u.daily_sent, u.monthly_sent, u.quota_ring_groups, u.quota_call_queues, u.quota_voicemail, u.quota_conference, u.quota_music_on_hold, u.quota_extensions, u.quota_devices, u.quota_ivr_menus, t.company";
 
     Corelog::log("user search with $query", Corelog::DEBUG, array('aFilter' => $aFilter));
     $result = DB::query('user', $query);
@@ -493,7 +493,7 @@ class User
       $search_field = 'u.usr_id';
       $search_value = $this->user_id;
     }
-    $query = "SELECT u.* FROM " . self::$table . " u WHERE %search_field%='%search_value%'";
+    $query = "SELECT u.*, COALESCE(t.credit, 0) AS tenant_credit FROM " . self::$table . " u LEFT JOIN tenant t ON t.tenant_id = u.tenant_id WHERE %search_field%='%search_value%'";
     $result = DB::query(self::$table, $query, array('search_field' => $search_field, 'search_value' => $search_value));
     $data = mysqli_fetch_assoc($result);
     if ($data) {
@@ -517,7 +517,7 @@ class User
       $this->language_id = $data['language_id'];
       $this->timezone_id = $data['timezone_id'];
       $this->active = $data['active'];
-      $this->credit = $data['credit'];
+      $this->credit = $data['tenant_credit'];
       $this->daily_limit = $data['daily_limit'];
       $this->monthly_limit = $data['monthly_limit'];
       $this->daily_sent = $data['daily_sent'];
@@ -867,6 +867,7 @@ class User
       "mfa_enabled" => $is_ce ? "0" : (in_array('mfa_enabled', $this->tenant_permissions) ? "1" : "0"),  // pass MFA permission
       // "auth_type"   => $this->auth_type,
       "auth_verify" => $this->verify,
+      "credit" => $this->credit,
     );
 
     if ($token['user_id']) {

@@ -22,8 +22,7 @@ class ConferenceParticipantApi extends Api {
         if (!$row) throw new CoreException(404, 'Conference not found');
 
         $room = $row['conference_center_extension'];
-        $cmd  = "fs_cli -x 'conference " . escapeshellcmd($room) . " list' 2>/dev/null";
-        $raw  = @shell_exec($cmd);
+        $raw  = \ICT\Core\Realtime::run_cmd("conference {$room} list");
         if ($raw === null) $raw = '';
 
         $members = [];
@@ -66,8 +65,7 @@ class ConferenceParticipantApi extends Api {
         if ($member < 1) throw new CoreException(400, 'member_id is required');
 
         $room = $row['conference_center_extension'];
-        $cmd  = "fs_cli -x 'conference " . escapeshellcmd($room) . " $action $member' 2>/dev/null";
-        @shell_exec($cmd);
+        \ICT\Core\Realtime::run_cmd("conference {$room} {$action} {$member}");
 
         return ['status' => 'ok', 'action' => $action, 'member_id' => $member];
     }

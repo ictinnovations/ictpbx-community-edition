@@ -52,11 +52,12 @@ class Api
 
   protected function _authorize_pbx($permission, $write_op = false)
   {
-    if (can_access('user_admin')) return true;
+    if (can_access('super_admin')) return true;
+    if ($this->oUser && $this->oUser->is_tenant == '1') return true;
     if (!$write_op) {
       $user = $this->oUser;
       if ($user && !empty($user->user_permission)) {
-        $perms = array_map('trim', explode(',', $user->user_permission));
+        $perms = array_map('trim', preg_split('/[\s,]+/', $user->user_permission));
         if (in_array($permission, $perms)) return true;
       }
     }
