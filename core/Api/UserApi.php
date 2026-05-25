@@ -52,6 +52,10 @@ class UserApi extends Api
 
     $this->_enforce_user_caps($oUser, false);
 
+    if (!empty($data['role_id'])) {
+      $oUser->role_assign((int)$data['role_id']);
+    }
+
     if ($oUser->save()) {
       return $oUser->user_id;
     } else {

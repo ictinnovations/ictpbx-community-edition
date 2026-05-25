@@ -71,6 +71,7 @@ class Internalfax
       $oSession = Session::get_instance();
       $aprogram = Program::load('faxtoemail');
       $aprogram->account_id = $acc_id;
+      $aprogram->tenant_id = $this->tenant_id;
       $aprogram->save();
       $aprogram->deploy();
       $in_transmission = $aprogram->transmission_create($contact_id, $acc_id, Transmission::INBOUND);
@@ -126,7 +127,10 @@ class Internalfax
 
   public function assign_to_owner()
   {
-    $query = "UPDATE transmission SET created_by = $this->created_by WHERE transmission_id = $this->transmission_id";
+    if (is_null($this->created_by)) {
+      return true;
+    }
+    $query = "UPDATE transmission SET created_by = " . (int)$this->created_by . " WHERE transmission_id = " . (int)$this->transmission_id;
     return DB::query('transmission', $query);
   }
 

@@ -173,7 +173,11 @@ class GroupApi extends Api
     if (in_array($mime, $allowedTypes)) {
       if (!empty($data)) {
         $file_path = $path_cache . DIRECTORY_SEPARATOR . 'group_'.$group_id.'.csv';
-        file_put_contents($file_path, $data);
+        $lines = preg_split('/\r\n|\n|\r/', trim($data));
+        if (!empty($lines) && strtolower(trim($lines[0])) === 'phone') {
+          array_shift($lines);
+        }
+        file_put_contents($file_path, implode("\n", $lines) . "\n");
         $oGroup = new Group($group_id);
         if ($oGroup) {
           $contact_daemon = $path_root . DIRECTORY_SEPARATOR . 'bin' . DIRECTORY_SEPARATOR . 'contact';

@@ -417,7 +417,8 @@ class Transmission
 
   public static function set_interval_fax($retry_interval)
   {
-    $query = "update retry_interval set retry_interval= $retry_interval";
+    $seconds = is_array($retry_interval) ? (int)($retry_interval['seconds'] ?? 60) : (int)$retry_interval;
+    $query = "update retry_interval set retry_interval= $seconds";
     $result = DB::query('retry_interval', $query);
     return $result;
   }
@@ -541,8 +542,12 @@ class Transmission
 
   public function save()
   {
-    $this->account_id = $this->oAccount->account_id;
-    $this->contact_id = $this->oContact->contact_id;
+    if (is_object($this->oAccount)) {
+      $this->account_id = $this->oAccount->account_id;
+    }
+    if (is_object($this->oContact)) {
+      $this->contact_id = $this->oContact->contact_id;
+    }
 
     $data = array(
       'transmission_id' => $this->transmission_id,

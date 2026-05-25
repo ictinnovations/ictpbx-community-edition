@@ -67,8 +67,8 @@ class MusicOnHold
       'music_on_hold_chime_max'  => $this->music_on_hold_chime_max ?: 0,
     ];
 
-    $nameCheck = $pdo->prepare("SELECT COUNT(*) FROM v_music_on_hold WHERE domain_uuid = ? AND music_on_hold_name = ? AND music_on_hold_uuid != ?");
-    $nameCheck->execute([$domain_uuid, $this->music_on_hold_name, $this->music_on_hold_uuid ?? '']);
+    $nameCheck = $pdo->prepare("SELECT COUNT(*) FROM v_music_on_hold WHERE domain_uuid = ? AND music_on_hold_name = ? AND music_on_hold_uuid IS DISTINCT FROM ?");
+    $nameCheck->execute([$domain_uuid, $this->music_on_hold_name, $this->music_on_hold_uuid]);
     if ((int)$nameCheck->fetchColumn() > 0) {
       throw new CoreException(409, "A Music on Hold category named '{$this->music_on_hold_name}' already exists in this domain.");
     }

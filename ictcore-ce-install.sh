@@ -161,7 +161,8 @@ ok "EPEL + PowerTools/CRB enabled"
 
 info "Installing base utilities..."
 quiet dnf install -y git curl wget unzip tar jq openssl \
-    policycoreutils-python-utils
+    policycoreutils-python-utils sendmail sendmail-cf
+quiet systemctl enable --now sendmail
 ok "Base utilities installed"
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -322,6 +323,11 @@ dnf install -y \
     freeswitch-sounds-en-us-callie-8000 \
     freeswitch-asrtts-flite
 
+# Optional codec packages — best-effort; not all repos carry every RPM.
+dnf install -y freeswitch-codec-opus freeswitch-codec-bcg729 2>/dev/null \
+    && ok "Opus + bcg729 codec packages installed" \
+    || warn "freeswitch-codec-opus/bcg729 not in repo — WebRTC will fall back to PCMU/PCMA"
+
 # okay.com.mx FreeSWITCH RPMs do not ship a systemd unit. Create the
 # freeswitch:daemon user/group the unit expects, then write the unit file
 # matching EE prod 66.42.114.181's working configuration.
@@ -382,6 +388,29 @@ if [[ -f "$FS_MODULES" ]]; then
     grep -q '<load module="mod_curl"/>' "$FS_MODULES" \
         || echo '    <load module="mod_curl"/>' >> "$FS_MODULES"
     ok "mod_curl enabled in $FS_MODULES"
+
+    # Enable opus (WebRTC wideband audio) and bcg729 (free G.729, patents expired ~2017)
+    grep -q '<load module="mod_opus"/>' "$FS_MODULES" \
+        || sed -i 's|</modules>|  <load module="mod_opus"/>\n  <load module="mod_bcg729"/>\n</modules>|' "$FS_MODULES"
+    ok "mod_opus + mod_bcg729 enabled in $FS_MODULES"
+fi
+
+# Write opus.conf.xml with VBR + FEC enabled for best WebRTC audio quality
+FS_OPUS=/etc/freeswitch/autoload_configs/opus.conf.xml
+if [[ ! -f "$FS_OPUS" ]]; then
+    cat > "$FS_OPUS" << 'OPUSCONF'
+<configuration name="opus.conf">
+  <settings>
+    <param name="use-vbr" value="1"/>
+    <param name="complexity" value="10"/>
+    <param name="keep-fec-enabled" value="1"/>
+    <param name="maxaveragebitrate" value="0"/>
+    <param name="maxplaybackrate" value="0"/>
+    <param name="mono" value="0"/>
+  </settings>
+</configuration>
+OPUSCONF
+    ok "opus.conf.xml written (VBR + FEC enabled)"
 fi
 
 # Raise sessions-per-second from default 30 to 100 — default causes
@@ -452,9 +481,46 @@ if [[ -f "$FS_INTERNAL" ]]; then
     fi
 fi
 
+# WebRTC SIP profile — dedicated profile for JsSIP softphone (port 5080, ws :5066).
+# Uses $${local_ip_v4} so force-register-domain resolves to the server's IP at FS startup.
+# Codec prefs: opus first (WebRTC wideband), then PCMA/PCMU fallback.
+FS_WEBRTC=/etc/freeswitch/sip_profiles/webrtc.xml
+if [[ ! -f "$FS_WEBRTC" ]]; then
+    cat > "$FS_WEBRTC" << 'WEBRTCPROFILE'
+<profile name="webrtc">
+  <settings>
+    <param name="user-agent-string" value="FreeSWITCH"/>
+    <param name="debug" value="0"/>
+    <param name="sip-port" value="5080"/>
+    <param name="ws-binding" value=":5066"/>
+    <param name="context" value="ictcore"/>
+    <param name="rtp-ip" value="$${local_ip_v4}"/>
+    <param name="sip-ip" value="$${local_ip_v4}"/>
+    <param name="ext-rtp-ip" value="auto-nat"/>
+    <param name="ext-sip-ip" value="auto-nat"/>
+    <param name="inbound-codec-prefs" value="opus,PCMA,PCMU"/>
+    <param name="outbound-codec-prefs" value="opus,PCMA,PCMU"/>
+    <param name="nonce-ttl" value="60"/>
+    <param name="auth-calls" value="true"/>
+    <param name="apply-nat-acl" value="nat.auto"/>
+    <param name="local-network-acl" value="localnet.auto"/>
+    <param name="force-register-domain" value="$${local_ip_v4}"/>
+    <param name="enable-timer" value="false"/>
+  </settings>
+</profile>
+WEBRTCPROFILE
+    ok "webrtc.xml SIP profile created (port 5080, ws :5066, opus,PCMA,PCMU)"
+else
+    # Idempotent: ensure codec prefs include opus on existing installs
+    sed -i 's|<param name="inbound-codec-prefs" value="[^"]*"/>|<param name="inbound-codec-prefs" value="opus,PCMA,PCMU"/>|' "$FS_WEBRTC"
+    sed -i 's|<param name="outbound-codec-prefs" value="[^"]*"/>|<param name="outbound-codec-prefs" value="opus,PCMA,PCMU"/>|' "$FS_WEBRTC"
+    ok "webrtc.xml SIP profile updated (codec prefs: opus,PCMA,PCMU)"
+fi
+
 # Reload FreeSWITCH XML so the internal profile picks up the certificate and starts.
 fs_cli -p "$ESL_PASS" -x 'reloadxml' >/dev/null 2>&1 || true
 fs_cli -p "$ESL_PASS" -x 'sofia profile internal start' >/dev/null 2>&1 || true
+fs_cli -p "$ESL_PASS" -x 'sofia profile webrtc start' >/dev/null 2>&1 || true
 
 # Open required ports — only if firewalld is actually running.
 # On cloud images without firewalld, port management is upstream (panel).
@@ -722,6 +788,23 @@ if [[ "$SCHEMA_LOADED" != "1" || "${FORCE_SCHEMA:-}" == "1" ]]; then
     done
 fi
 
+# Idempotent post-schema hardening — covers gaps not always present in shipped SQL files
+# (issues #12 login_attempt, #13 spool.cost).
+mysql -u root -p"${MARIADB_ROOT_PASS}" ictfax 2>/tmp/mysql-fix.err <<'SQLFIX' || \
+    warn "Post-schema hardening hit errors: $(tail -3 /tmp/mysql-fix.err | tr '\n' ' ')"
+-- #12 login_attempt table (referenced by AuthenticateApi on every login)
+CREATE TABLE IF NOT EXISTS login_attempt (
+    login_attempt_id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id     INT(6) NOT NULL,
+    attempts    INT DEFAULT 0,
+    ip_address  VARCHAR(255)
+);
+
+-- #13 spool.cost column (referenced by transmission listing)
+ALTER TABLE spool ADD COLUMN IF NOT EXISTS cost DECIMAL(10,4) DEFAULT 0;
+SQLFIX
+ok "Post-schema hardening applied (login_attempt, spool.cost)"
+
 # Seed role+admin data — only if usr table is empty (avoids duplicate-key on re-run).
 USR_COUNT=$(mysql -u root -p"${MARIADB_ROOT_PASS}" -N -B -e "SELECT COUNT(*) FROM ictfax.usr;" 2>/dev/null || echo 0)
 if [[ "$USR_COUNT" == "0" ]]; then
@@ -781,12 +864,14 @@ fi
 hdr "Step 11: ICTCore configuration"
 
 SERVER_IP=$(hostname -I | awk '{print $1}')
-if [[ "${INSTALLER_AUTO:-0}" == "1" ]]; then
-    PUBLIC_HOST="${PUBLIC_HOST:-$SERVER_IP}"
-    ok "Public hostname/IP: ${PUBLIC_HOST}"
-else
-    read -rp "  Public hostname/IP [${SERVER_IP}]: " _PH
-    PUBLIC_HOST="${_PH:-${PUBLIC_HOST:-$SERVER_IP}}"
+if [[ -z "${PUBLIC_HOST:-}" ]]; then
+    if [[ "${INSTALLER_AUTO:-0}" == "1" ]]; then
+        PUBLIC_HOST="$SERVER_IP"
+        ok "PUBLIC_HOST not set — defaulting to $SERVER_IP (INSTALLER_AUTO)"
+    else
+        read -rp "  Public hostname/IP [${SERVER_IP}]: " _PH
+        PUBLIC_HOST="${_PH:-$SERVER_IP}"
+    fi
 fi
 
 # Optional: SMTP + branding — press Enter to skip (current behavior). Env override:
@@ -819,18 +904,35 @@ SMTP_PORT="${SMTP_PORT:-}"
 SMTP_USER="${SMTP_USER:-}"
 SMTP_PASS="${SMTP_PASS:-}"
 
+# When a domain name (not bare IP) is used, write https:// so JWT iss matches the
+# browser origin. Without this, token validation fails on TLS deployments.
+PUBLIC_DOMAIN="${DOMAIN:-}"
+if [[ -z "$PUBLIC_DOMAIN" && "$PUBLIC_HOST" =~ [a-zA-Z] ]]; then
+    PUBLIC_DOMAIN="$PUBLIC_HOST"
+fi
+if [[ -n "$PUBLIC_DOMAIN" ]]; then
+    WEBSITE_URL="https://${PUBLIC_DOMAIN}/api"
+    WEBSITE_HOST="$PUBLIC_DOMAIN"
+    WEBSITE_PORT=443
+    info "Configuring [website] for HTTPS at ${WEBSITE_URL}"
+else
+    WEBSITE_URL="http://${PUBLIC_HOST}/api"
+    WEBSITE_HOST="$PUBLIC_HOST"
+    WEBSITE_PORT=80
+fi
+
 cat > "$ICTCORE_DIR/etc/ictcore.conf" <<CONF
 [company]
 name = ${COMPANY_NAME}
 
 [website]
-host  = ${PUBLIC_HOST}
-port  = 80
+host  = ${WEBSITE_HOST}
+port  = ${WEBSITE_PORT}
 path  = /api/
-url   = http://${PUBLIC_HOST}/api
+url   = ${WEBSITE_URL}
 
 [provisioning]
-host = ${PUBLIC_HOST}
+host = ${WEBSITE_HOST}
 port = 5060
 wss  = 7443
 
@@ -878,7 +980,7 @@ pass =
 title = ${SITE_TITLE}
 
 [domain]
-name = ${PUBLIC_HOST}
+name = ${WEBSITE_HOST}
 
 [edition]
 mode = community
@@ -894,6 +996,17 @@ CONF
 chown ictcore:ictcore "$ICTCORE_DIR/etc/ictcore.conf"
 chmod 640 "$ICTCORE_DIR/etc/ictcore.conf"
 ok "ictcore.conf written"
+
+# When a domain name is configured for HTTPS, patch webrtc.xml:
+# - add wss-binding :5067 (JsSIP-over-HTTPS requires WSS; plain ws: blocks from HTTPS pages)
+# - update force-register-domain to the public domain for sofia_contact() lookups
+if [[ -n "$PUBLIC_DOMAIN" && -f "$FS_WEBRTC" ]]; then
+    if ! grep -q 'wss-binding' "$FS_WEBRTC"; then
+        sed -i 's|<param name="ws-binding" value=":5066"/>|<param name="ws-binding" value=":5066"/>\n    <param name="wss-binding" value=":5067"/>|' "$FS_WEBRTC"
+    fi
+    sed -i "s|<param name=\"force-register-domain\" value=\"[^\"]*\"/>|<param name=\"force-register-domain\" value=\"$PUBLIC_DOMAIN\"/>|" "$FS_WEBRTC"
+    ok "webrtc.xml: wss-binding :5067 added, force-register-domain=$PUBLIC_DOMAIN"
+fi
 
 # ICTCore's Conf\File class defaults to /etc/ictcore.conf — symlink it.
 ln -sfn "$ICTCORE_DIR/etc/ictcore.conf" /etc/ictcore.conf
@@ -1097,6 +1210,92 @@ setsebool -P httpd_can_network_connect_db 1 &>/dev/null || true
 systemctl restart php-fpm
 systemctl restart httpd
 ok "Apache vhost written: $APACHE_CONF"
+
+# HTTPS / Let's Encrypt — runs only when a real domain name is configured.
+# Requires TLS_EMAIL env var for the ACME account. Port 80 must be reachable
+# from the internet before this step (HTTP-01 challenge).
+if [[ -n "$PUBLIC_DOMAIN" ]]; then
+    hdr "Step 13b: Let's Encrypt HTTPS"
+    if [[ -z "${TLS_EMAIL:-}" && "${INSTALLER_AUTO:-0}" != "1" ]]; then
+        read -rp "  Email for Let's Encrypt account (required): " TLS_EMAIL
+    fi
+    if [[ -z "${TLS_EMAIL:-}" ]]; then
+        warn "TLS_EMAIL not set — skipping Let's Encrypt. Run: certbot --apache -d $PUBLIC_DOMAIN after install."
+    else
+        if ! command -v certbot &>/dev/null; then
+            info "Installing certbot..."
+            quiet dnf install -y certbot python3-certbot-apache || \
+                warn "certbot install failed — manual cert setup required"
+        fi
+        if command -v certbot &>/dev/null; then
+            if [[ ! -f "/etc/letsencrypt/live/$PUBLIC_DOMAIN/fullchain.pem" ]]; then
+                certbot certonly --apache --non-interactive --agree-tos \
+                    -m "$TLS_EMAIL" -d "$PUBLIC_DOMAIN" 2>>"$LOG" \
+                    && ok "Let's Encrypt cert issued for $PUBLIC_DOMAIN" \
+                    || warn "certbot failed — check $LOG; HTTPS vhost skipped"
+            else
+                ok "Let's Encrypt cert already exists for $PUBLIC_DOMAIN"
+            fi
+        fi
+        if [[ -f "/etc/letsencrypt/live/$PUBLIC_DOMAIN/fullchain.pem" ]]; then
+            SSL_DOCROOT=$([[ -f /usr/ictpbxx/dist/index.html ]] && echo "/usr/ictpbxx/dist" || echo "/var/www/html")
+            if ! grep -q 'mod_ssl' /etc/httpd/conf.modules.d/*.conf 2>/dev/null; then
+                quiet dnf install -y mod_ssl || true
+            fi
+            cat > /etc/httpd/conf.d/ictpbx-ssl.conf <<SSLVHOST
+# HTTP → HTTPS redirect
+<VirtualHost *:80>
+    ServerName ${PUBLIC_DOMAIN}
+    RewriteEngine On
+    RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
+</VirtualHost>
+
+<VirtualHost *:443>
+    ServerName ${PUBLIC_DOMAIN}
+    DocumentRoot ${SSL_DOCROOT}
+
+    SSLEngine on
+    SSLCertificateFile    /etc/letsencrypt/live/${PUBLIC_DOMAIN}/fullchain.pem
+    SSLCertificateKeyFile /etc/letsencrypt/live/${PUBLIC_DOMAIN}/privkey.pem
+
+    <Directory ${SSL_DOCROOT}>
+        Options FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+
+    Alias /api /usr/ictcore/wwwroot
+    <Directory /usr/ictcore/wwwroot>
+        SetEnv PHP_ADMIN_VALUE "open_basedir = /usr/ictcore/:/etc/ictcore.conf:/usr/bin:/bin:/tmp/"
+        Options Indexes FollowSymLinks Includes
+        AllowOverride All
+        Require all granted
+    </Directory>
+
+    # WebSocket proxy for JsSIP softphone over HTTPS.
+    # Routes wss://HOST/ws/ to FreeSWITCH port 5067 (native WSS).
+    # SSLProxy directives required for SSL-to-SSL proxying.
+    SSLProxyEngine on
+    SSLProxyVerify none
+    SSLProxyCheckPeerCN off
+    SSLProxyCheckPeerName off
+    ProxyRequests Off
+    RewriteEngine On
+    RewriteCond %{HTTP:Upgrade} websocket [NC]
+    RewriteCond %{HTTP:Connection} upgrade [NC]
+    RewriteRule ^/ws(/.*)?$ wss://127.0.0.1:5067/\$1 [P,L]
+    ProxyPass /ws/ wss://127.0.0.1:5067/
+    ProxyPassReverse /ws/ wss://127.0.0.1:5067/
+
+    ErrorLog  /var/log/httpd/ictpbx_ssl_error.log
+    CustomLog /var/log/httpd/ictpbx_ssl_access.log combined
+</VirtualHost>
+SSLVHOST
+            systemctl restart httpd
+            ok "HTTPS vhost written: /etc/httpd/conf.d/ictpbx-ssl.conf (wss://127.0.0.1:5067)"
+        fi
+    fi
+fi
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # STEP 14 — Firewall

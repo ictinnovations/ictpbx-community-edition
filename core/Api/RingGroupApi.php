@@ -57,6 +57,10 @@ class RingGroupApi extends Api
     if (!PbxQuota::check($this->oUser->tenant_id, PbxQuota::RING_GROUP)) {
       throw new CoreException(409, 'Ring Group quota limit reached for this tenant');
     }
+    if (isset($data['ring_group_destinations']) && !isset($data['destinations'])) {
+      $data['destinations'] = $data['ring_group_destinations'];
+      unset($data['ring_group_destinations']);
+    }
     $oRingGroup = new RingGroup();
     $oRingGroup->tenant_id = $this->oUser->tenant_id;
     $this->set($oRingGroup, $data);
@@ -78,6 +82,10 @@ class RingGroupApi extends Api
     $this->_authorize_pbx('ring_groups', true);
     $oRingGroup = new RingGroup($ring_group_uuid);
     $this->_assert_pbx_domain($oRingGroup);
+    if (isset($data['ring_group_destinations']) && !isset($data['destinations'])) {
+      $data['destinations'] = $data['ring_group_destinations'];
+      unset($data['ring_group_destinations']);
+    }
     $this->set($oRingGroup, $data);
     if ($oRingGroup->save()) {
       return $oRingGroup;

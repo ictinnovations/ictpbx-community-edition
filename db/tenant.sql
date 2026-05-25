@@ -11,7 +11,7 @@ CREATE TABLE tenant
     country_id        int(11)                NULL,
     timezone_id       int(11)                NULL,
     active            int(1)                 NOT NULL,
-    credit            int(16)                NULL default 0,
+    credit            DECIMAL(10,4)          NULL default 0.0000,
     daily_limit       int(16)                NOT NULL default 0,
     monthly_limit     int(16)                NOT NULL default 0,
     daily_sent        int(16)                NOT NULL default 0,

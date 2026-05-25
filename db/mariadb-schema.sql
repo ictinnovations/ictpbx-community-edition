@@ -461,7 +461,7 @@ CREATE TABLE `document` (
   `document_id` int(11) unsigned NOT NULL AUTO_INCREMENT,
   `tenant_id` int(11) NOT NULL DEFAULT 0,
   `name` varchar(128) NOT NULL,
-  `type` varchar(8) NOT NULL DEFAULT '',
+  `type` varchar(32) NOT NULL DEFAULT '',
   `file_name` varchar(128) NOT NULL DEFAULT '',
   `file_source` varchar(255) NOT NULL DEFAULT '',
   `description` varchar(255) NOT NULL DEFAULT '',

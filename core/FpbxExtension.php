@@ -227,6 +227,9 @@ class FpbxExtension
        'type'  => $this->extension_type ?: 'voice',
        'email' => $this->fax_email ?? '']);
 
+    $this->sync_fs_directory(false);
+    try { \ICT\Core\Realtime::run_cmd('reloadxml'); } catch (\Throwable $e) { /* non-fatal */ }
+
     return $this->extension_uuid;
   }
 
@@ -256,6 +259,8 @@ class FpbxExtension
     $pdo = FpbxDomain::fpbx_db();
     $pdo->prepare("DELETE FROM v_extensions WHERE extension_uuid = :uuid")
         ->execute(['uuid' => $this->extension_uuid]);
+
+    $this->sync_fs_directory(true);
 
     // Reload FS XML so the deleted extension is no longer served from the directory
     try { \ICT\Core\Realtime::run_cmd('reloadxml'); } catch (\Throwable $e) { /* non-fatal */ }
@@ -302,6 +307,67 @@ class FpbxExtension
           ['tid' => $tid, 'username' => $username, 'phone' => $this->extension, 'email' => $email]);
       }
     }
+  }
+
+  private function sync_fs_directory(bool $delete = false): void
+  {
+    global $path_etc;
+    $ext_dir    = $path_etc . '/freeswitch/directory/fpbx_extensions';
+    $domain_file = '/etc/freeswitch/directory/fpbx_webrtc.xml';
+    $ext_file   = $ext_dir . '/' . $this->extension_uuid . '.xml';
+
+    if ($delete) {
+      if (file_exists($ext_file)) {
+        @unlink($ext_file);
+      }
+      return;
+    }
+
+    // Only voice extensions register via WebRTC; fax extensions use T.38
+    if (($this->extension_type ?: 'voice') !== 'voice') {
+      if (file_exists($ext_file)) {
+        @unlink($ext_file);
+      }
+      return;
+    }
+
+    // Ensure per-extension directory exists
+    if (!is_dir($ext_dir)) {
+      mkdir($ext_dir, 0755, true);
+    }
+
+    // Create domain wrapper file once if missing
+    if (!file_exists($domain_file)) {
+      file_put_contents($domain_file,
+        '<include>' . "\n" .
+        '  <domain name="$${local_ip_v4}">' . "\n" .
+        '    <params>' . "\n" .
+        '      <param name="dial-string" value="{presence_id=${dialed_user}@${dialed_domain}}${sofia_contact(*/${dialed_user}@${dialed_domain})}"/>' . "\n" .
+        '    </params>' . "\n" .
+        '    <groups><group name="default"><users>' . "\n" .
+        '      <X-PRE-PROCESS cmd="include" data="' . $ext_dir . '/*.xml"/>' . "\n" .
+        '    </users></group></groups>' . "\n" .
+        '  </domain>' . "\n" .
+        '</include>' . "\n"
+      );
+    }
+
+    $ext  = htmlspecialchars($this->extension, ENT_XML1);
+    $pass = htmlspecialchars($this->password ?? '', ENT_XML1);
+    $name = htmlspecialchars($this->effective_caller_id_name ?: $this->extension, ENT_XML1);
+
+    file_put_contents($ext_file,
+      '<user id="' . $ext . '">' . "\n" .
+      '  <params>' . "\n" .
+      '    <param name="password" value="' . $pass . '"/>' . "\n" .
+      '  </params>' . "\n" .
+      '  <variables>' . "\n" .
+      '    <variable name="user_context" value="ictcore"/>' . "\n" .
+      '    <variable name="effective_caller_id_name" value="' . $name . '"/>' . "\n" .
+      '    <variable name="effective_caller_id_number" value="' . $ext . '"/>' . "\n" .
+      '  </variables>' . "\n" .
+      '</user>' . "\n"
+    );
   }
 
   private function generate_uuid()

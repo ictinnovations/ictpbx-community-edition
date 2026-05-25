@@ -26,3 +26,12 @@ etc/freeswitch/directory/*/
 *.bak
 *.bak.*
 etc/ictcore.conf.bak*
+
+# PHPUnit and dev-only vendor packages (contain embedded .git repos)
+vendor/bin/
+vendor/myclabs/
+vendor/nikic/
+vendor/phar-io/
+vendor/phpunit/
+vendor/sebastian/
+vendor/theseer/
