@@ -320,6 +320,10 @@ class FpbxExtension
       if (file_exists($ext_file)) {
         @unlink($ext_file);
       }
+      // Touch domain file so FS re-expands the glob on next reloadxml
+      if (file_exists($domain_file)) {
+        touch($domain_file);
+      }
       return;
     }
 
@@ -327,6 +331,10 @@ class FpbxExtension
     if (($this->extension_type ?: 'voice') !== 'voice') {
       if (file_exists($ext_file)) {
         @unlink($ext_file);
+      }
+      // Touch domain file so FS re-expands the glob on next reloadxml
+      if (file_exists($domain_file)) {
+        touch($domain_file);
       }
       return;
     }
@@ -368,6 +376,10 @@ class FpbxExtension
       '  </variables>' . "\n" .
       '</user>' . "\n"
     );
+
+    // Touch domain file so FS re-expands the *.xml glob on next reloadxml.
+    // When implementing per-tenant domains, change $domain_file to the tenant's domain wrapper.
+    touch($domain_file);
   }
 
   private function generate_uuid()
