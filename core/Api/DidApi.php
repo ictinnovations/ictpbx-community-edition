@@ -156,10 +156,11 @@ class DidApi extends Api
       $app_row = mysqli_fetch_assoc($app);
       $application_id = $app_row['application_id'] ?? null;
       if ($application_id) {
+        $source = !empty($domain) ? $domain : '%';
         DB::query('account',
           "INSERT INTO dialplan (gateway_flag, source, destination, context, program_id, application_id, filter_flag)
-           VALUES (8, '%', '%phone%', 'external', '$program_id', '$application_id', 31)",
-          ['phone' => $phone]
+           VALUES (8, '%source%', '%phone%', 'external', '$program_id', '$application_id', 31)",
+          ['source' => $source, 'phone' => $phone]
         );
         DB::query('account',
           "INSERT IGNORE INTO destination (prefix, name) VALUES ('%phone%', '%label%')",
@@ -218,6 +219,15 @@ class DidApi extends Api
       "UPDATE account SET " . implode(', ', $sets) . " WHERE account_id='$account_id'",
       $params
     );
+
+    if (isset($data['domain'])) {
+      $new_source = !empty($params['domain']) ? $params['domain'] : '%';
+      DB::query('account',
+        "UPDATE dialplan SET source='%src%' WHERE destination='%phone%'",
+        ['src' => $new_source, 'phone' => $did['phone']]
+      );
+    }
+
     return true;
   }
 
