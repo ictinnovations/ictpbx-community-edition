@@ -140,6 +140,8 @@ class CallFlow
     } catch (\PDOException $e) {
       throw new CoreException(500, 'Call Flow save failed: ' . $e->getMessage());
     }
+
+    $this->sync_fs_dialplan();
     return $this->call_flow_uuid;
   }
 
@@ -284,7 +286,52 @@ class CallFlow
     } catch (\PDOException $e) {
       throw new CoreException(500, 'Call Flow delete failed: ' . $e->getMessage());
     }
+    $this->sync_fs_dialplan(true);
     return true;
+  }
+
+  private function sync_fs_dialplan($delete = false)
+  {
+    $dp_dir  = '/usr/ictcore/etc/freeswitch/dialplan/call_flows';
+    $dp_file = $dp_dir . '/' . $this->call_flow_uuid . '.xml';
+
+    if ($delete) {
+      if (file_exists($dp_file)) @unlink($dp_file);
+    } else {
+      if (!is_dir($dp_dir)) @mkdir($dp_dir, 0755, true);
+      $e    = fn($s) => htmlspecialchars((string)$s, ENT_XML1, 'UTF-8');
+      $ext  = $e($this->call_flow_extension ?? '');
+      $nm   = $e($this->call_flow_name ?? 'cf_' . $this->call_flow_uuid);
+      $uuid = $e($this->call_flow_uuid);
+
+      // Route based on current status: 'true' = open/normal, 'false' = closed/alternate
+      $status      = ($this->call_flow_status === 'true' || $this->call_flow_status === true);
+      $open_dest   = preg_replace('/\s+XML\s+\S+$/i', '', (string)($this->call_flow_data ?? ''));
+      $closed_dest = preg_replace('/\s+XML\s+\S+$/i', '', (string)($this->call_flow_alternate_data ?? ''));
+      $active_dest = $status ? $open_dest : $closed_dest;
+
+      $xml  = '<?xml version="1.0" encoding="utf-8"?>' . "\n<include>\n";
+      $xml .= "  <extension name=\"{$nm}\" continue=\"false\" uuid=\"{$uuid}\">\n";
+      $xml .= "    <condition field=\"destination_number\" expression=\"^{$ext}\$\">\n";
+      if ($active_dest !== '') {
+        $xml .= "      <action application=\"transfer\" data=\"{$e($active_dest)} XML ictcore\"/>\n";
+      } else {
+        $xml .= "      <action application=\"hangup\"/>\n";
+      }
+      $xml .= "    </condition>\n  </extension>\n</include>\n";
+
+      file_put_contents($dp_file, $xml);
+    }
+
+    @touch('/etc/freeswitch/dialplan/ictcore.xml');
+
+    try {
+      if (class_exists('\\ICT\\Core\\Realtime')) {
+        \ICT\Core\Realtime::run_cmd('reloadxml');
+      }
+    } catch (\Throwable $ex) {
+      Corelog::log("CallFlow reloadxml failed: " . $ex->getMessage(), Corelog::WARNING);
+    }
   }
 
   private static function generate_uuid()

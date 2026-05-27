@@ -174,6 +174,8 @@ class RingGroup
       }
     }
 
+    $this->sync_fs_dialplan();
+
     return $this->ring_group_uuid;
   }
 
@@ -206,10 +208,101 @@ class RingGroup
         ->execute(['uuid' => $uuid]);
     $pdo->prepare("DELETE FROM v_ring_groups WHERE ring_group_uuid = :uuid")
         ->execute(['uuid' => $uuid]);
+    $this->sync_fs_dialplan(true);
     return true;
   }
 
   public function get_id() { return $this->ring_group_uuid; }
+
+  private function sync_fs_dialplan($delete = false)
+  {
+    $dir  = '/usr/ictcore/etc/freeswitch/dialplan/ring_groups';
+    $file = $dir . '/' . $this->ring_group_uuid . '.xml';
+
+    if ($delete) {
+      if (file_exists($file)) {
+        @unlink($file);
+        Corelog::log("Ring group XML removed: $file", Corelog::CRUD);
+      }
+    } else {
+      // Resolve domain name for user@ format
+      $domain_name = FpbxDomain::get_domain_name($this->domain_uuid);
+      if (empty($domain_name)) {
+        // Fallback: query v_domains directly
+        try {
+          $pdo2 = FpbxDomain::fpbx_db();
+          $s = $pdo2->prepare("SELECT domain_name FROM v_domains WHERE domain_uuid = :uuid LIMIT 1");
+          $s->execute(['uuid' => $this->domain_uuid]);
+          $row = $s->fetch(\PDO::FETCH_ASSOC);
+          $domain_name = $row ? $row['domain_name'] : 'localhost';
+        } catch (\Throwable $ex) {
+          $domain_name = 'localhost';
+        }
+      }
+
+      // Fetch ring group destinations
+      $bridge_string = 'error/unallocated';
+      try {
+        $pdo2 = FpbxDomain::fpbx_db();
+        $stmt = $pdo2->prepare(
+          "SELECT destination_number FROM v_ring_group_destinations
+           WHERE ring_group_uuid = :uuid AND destination_enabled = 'true'
+           ORDER BY destination_delay, destination_number"
+        );
+        $stmt->execute(['uuid' => $this->ring_group_uuid]);
+        $members = $stmt->fetchAll(\PDO::FETCH_COLUMN);
+        if (!empty($members)) {
+          $bridge_parts = array_map(function($ext) use ($domain_name) {
+            return 'user/' . $ext . '@' . $domain_name;
+          }, $members);
+          $bridge_string = implode('|', $bridge_parts);
+        }
+      } catch (\Throwable $ex) {
+        Corelog::log("Ring group destination fetch failed: " . $ex->getMessage(), Corelog::WARNING);
+      }
+
+      $e    = function($s) { return htmlspecialchars((string)$s, ENT_XML1, 'UTF-8'); };
+      $name = $e($this->ring_group_name);
+      $ext  = $e($this->ring_group_extension);
+      $tout = (int)($this->ring_group_call_timeout ?: 30);
+      $bstr = $e($bridge_string);
+
+      $xml  = '<?xml version="1.0" encoding="utf-8"?>' . "\n";
+      $xml .= '<include>' . "\n";
+      $xml .= "  <extension name=\"{$name}\" continue=\"false\">\n";
+      $xml .= "    <condition field=\"destination_number\" expression=\"^{$ext}\$\">\n";
+      $xml .= "      <action application=\"set\" data=\"ringback=\$\${us-ring}\"/>\n";
+      $xml .= "      <action application=\"set\" data=\"call_timeout={$tout}\"/>\n";
+      $xml .= "      <action application=\"bridge\" data=\"{$bstr}\"/>\n";
+
+      // Timeout action if configured
+      if (!empty($this->ring_group_timeout_app)) {
+        $timeout_app  = $e($this->ring_group_timeout_app);
+        $timeout_data = $e($this->ring_group_timeout_data ?: '');
+        $xml .= "      <action application=\"{$timeout_app}\" data=\"{$timeout_data}\"/>\n";
+      }
+
+      $xml .= "    </condition>\n";
+      $xml .= "  </extension>\n";
+      $xml .= '</include>' . "\n";
+
+      if (!is_dir($dir)) {
+        @mkdir($dir, 0755, true);
+      }
+      file_put_contents($file, $xml);
+      Corelog::log("Ring group XML written: $file", Corelog::CRUD);
+    }
+
+    @touch('/etc/freeswitch/dialplan/ictcore.xml');
+
+    try {
+      if (class_exists('\\ICT\\Core\\Realtime')) {
+        \ICT\Core\Realtime::run_cmd('reloadxml');
+      }
+    } catch (\Throwable $e) {
+      Corelog::log("reloadxml failed: " . $e->getMessage(), Corelog::WARNING);
+    }
+  }
 
   private function generate_uuid()
   {

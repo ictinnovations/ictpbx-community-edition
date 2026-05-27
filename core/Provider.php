@@ -429,7 +429,7 @@ class Provider
       'codec_prefs'          => $codec_prefs,
       'channels'             => is_numeric($this->channels) ? $this->channels : null,
       'extension_in_contact' => self::pgbool($this->extension_in_contact, false),
-      'context'              => !empty($this->context) ? $this->context : 'public',
+      'context'              => !empty($this->context) ? $this->context : 'ictcore',
       'profile'              => !empty($this->profile) ? $this->profile : 'external',
       'hostname'             => $this->hostname,
       'enabled'              => self::pgbool($this->enabled, ((int)$this->active === 1)),
@@ -470,6 +470,7 @@ class Provider
       Corelog::log("Provider {$this->provider_id} v_gateways row updated", Corelog::CRUD);
     }
 
+    $this->sync_fs_xml();
     return true;
   }
 
@@ -482,7 +483,68 @@ class Provider
     $stmt = $pdo->prepare('DELETE FROM v_gateways WHERE gateway_uuid = :uuid');
     $stmt->execute(['uuid' => $this->fpbx_gateway_uuid]);
     Corelog::log("v_gateways row {$this->fpbx_gateway_uuid} removed", Corelog::CRUD);
+    $this->sync_fs_xml(true);
     return true;
+  }
+
+  private function sync_fs_xml($delete = false)
+  {
+    $dir  = '/usr/ictcore/etc/freeswitch/sip_profiles/provider';
+    $safe = preg_replace('/[^a-zA-Z0-9_\-]/', '_', $this->name);
+    $file = $dir . '/' . $safe . '.xml';
+
+    if ($delete) {
+      if (file_exists($file)) {
+        @unlink($file);
+        Corelog::log("Gateway XML removed: $file", Corelog::CRUD);
+      }
+    } else {
+      $register    = ((int)$this->register === 1 || $this->register === 'true') ? 'true' : 'false';
+      $proxy       = !empty($this->proxy)       ? $this->proxy       : $this->host;
+      $realm       = !empty($this->realm)       ? $this->realm       : $this->host;
+      $from_user   = !empty($this->from_user)   ? $this->from_user   : $this->username;
+      $from_domain = !empty($this->from_domain) ? $this->from_domain : $this->host;
+      $transport   = !empty($this->register_transport) ? $this->register_transport : 'udp';
+      $expire      = is_numeric($this->expire_seconds) ? (int)$this->expire_seconds : 800;
+      $retry       = is_numeric($this->retry_seconds)  ? (int)$this->retry_seconds  : 30;
+      $fax_support = ((int)$this->service_flag & 2) > 0;
+      $codecs      = !empty($this->codec_prefs) ? $this->codec_prefs
+                       : ($fax_support ? 'PCMU,PCMA,T38' : 'PCMU,PCMA,OPUS,G722');
+
+      $e = function($s) { return htmlspecialchars((string)$s, ENT_XML1, 'UTF-8'); };
+      $xml  = '<?xml version="1.0" encoding="utf-8"?>' . "\n";
+      $xml .= '<include>' . "\n";
+      $xml .= '  <gateway name="' . $e($this->name) . '">' . "\n";
+      $xml .= '    <param name="username"           value="' . $e($this->username) . '"/>' . "\n";
+      $xml .= '    <param name="realm"              value="' . $e($realm)          . '"/>' . "\n";
+      $xml .= '    <param name="from-user"          value="' . $e($from_user)      . '"/>' . "\n";
+      $xml .= '    <param name="from-domain"        value="' . $e($from_domain)    . '"/>' . "\n";
+      $xml .= '    <param name="password"           value="' . $e($this->password) . '"/>' . "\n";
+      $xml .= '    <param name="proxy"              value="' . $e($proxy)          . '"/>' . "\n";
+      $xml .= '    <param name="register"           value="' . $register           . '"/>' . "\n";
+      $xml .= '    <param name="register-transport" value="' . $e($transport)      . '"/>' . "\n";
+      $xml .= '    <param name="expire-seconds"     value="' . $expire             . '"/>' . "\n";
+      $xml .= '    <param name="retry-seconds"      value="' . $retry              . '"/>' . "\n";
+      $xml .= '    <param name="codec-prefs"        value="' . $e($codecs)         . '"/>' . "\n";
+      $context_val = !empty($this->context) ? $this->context : 'ictcore';
+      $xml .= '    <param name="context"          value="' . $e($context_val)    . '"/>' . "\n";
+      $xml .= '  </gateway>' . "\n";
+      $xml .= '</include>' . "\n";
+
+      if (!is_dir($dir)) {
+        @mkdir($dir, 0755, true);
+      }
+      file_put_contents($file, $xml);
+      Corelog::log("Gateway XML written: $file", Corelog::CRUD);
+    }
+
+    try {
+      if (class_exists('\\ICT\\Core\\Realtime')) {
+        \ICT\Core\Realtime::run_cmd('sofia profile ictcore rescan');
+      }
+    } catch (\Throwable $e) {
+      Corelog::log("sofia rescan failed: " . $e->getMessage(), Corelog::WARNING);
+    }
   }
 
 

@@ -224,6 +224,7 @@ class CallQueue
       }
     }
 
+    $this->sync_fs_dialplan($pdo);
     return $this->call_center_queue_uuid;
   }
 
@@ -259,7 +260,160 @@ class CallQueue
         ->execute([$uuid]);
     $pdo->prepare("DELETE FROM v_call_center_queues WHERE call_center_queue_uuid = ?")
         ->execute([$uuid]);
+    $this->sync_fs_dialplan($pdo, true);
     return true;
+  }
+
+  private function sync_fs_dialplan($pdo, $delete = false)
+  {
+    $dp_dir  = '/usr/ictcore/etc/freeswitch/dialplan/call_queues';
+    $dp_file = $dp_dir . '/' . $this->call_center_queue_uuid . '.xml';
+
+    if ($delete) {
+      if (file_exists($dp_file)) @unlink($dp_file);
+    } else {
+      if (!is_dir($dp_dir)) @mkdir($dp_dir, 0755, true);
+      $e        = fn($s) => htmlspecialchars((string)$s, ENT_XML1, 'UTF-8');
+      $ext      = $e($this->queue_extension ?? '');
+      $nm       = $e($this->queue_name ?? 'queue_' . $this->call_center_queue_uuid);
+      $domain   = FpbxDomain::get_domain_name($this->domain_uuid) ?: 'localhost';
+      $q_data   = $e($this->queue_name . '@' . $domain);
+
+      $xml  = '<?xml version="1.0" encoding="utf-8"?>' . "\n<include>\n";
+      $xml .= "  <extension name=\"{$nm}\" continue=\"false\" uuid=\"{$e($this->call_center_queue_uuid)}\">\n";
+      $xml .= "    <condition field=\"destination_number\" expression=\"^{$ext}\$\">\n";
+      $xml .= "      <action application=\"answer\"/>\n";
+      $xml .= "      <action application=\"callcenter\" data=\"{$q_data}\"/>\n";
+      $xml .= "    </condition>\n  </extension>\n</include>\n";
+
+      file_put_contents($dp_file, $xml);
+    }
+
+    // Regenerate callcenter.conf.xml with all queues from PG so mod_callcenter
+    // knows about the queue configuration after reload.
+    $this->sync_callcenter_conf($pdo);
+
+    @touch('/etc/freeswitch/dialplan/ictcore.xml');
+
+    try {
+      if (class_exists('\\ICT\\Core\\Realtime')) {
+        \ICT\Core\Realtime::run_cmd('reloadxml');
+        \ICT\Core\Realtime::run_cmd('reload mod_callcenter');
+      }
+    } catch (\Throwable $ex) {
+      Corelog::log("CallQueue reload failed: " . $ex->getMessage(), Corelog::WARNING);
+    }
+  }
+
+  private function sync_callcenter_conf($pdo)
+  {
+    $conf_file = '/etc/freeswitch/autoload_configs/callcenter.conf.xml';
+
+    // Load all queues (all domains — mod_callcenter is global)
+    $queues = $pdo->query(
+      "SELECT q.*, d.domain_name
+       FROM v_call_center_queues q
+       LEFT JOIN v_domains d ON d.domain_uuid = q.domain_uuid
+       ORDER BY q.queue_name"
+    )->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+    // Load all agents
+    $agents = $pdo->query(
+      "SELECT * FROM v_call_center_agents ORDER BY agent_name"
+    )->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+    // Load all tiers
+    $tiers = $pdo->query(
+      "SELECT * FROM v_call_center_tiers ORDER BY tier_level, tier_position"
+    )->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+    $e = fn($s) => htmlspecialchars((string)$s, ENT_XML1, 'UTF-8');
+
+    $xml  = '<?xml version="1.0" encoding="utf-8"?>' . "\n";
+    $xml .= '<configuration name="callcenter.conf" description="CallCenter">' . "\n";
+    $xml .= "\t<settings>\n\t</settings>\n";
+    $xml .= "\t<queues>\n";
+
+    foreach ($queues as $q) {
+      $domain   = $q['domain_name'] ?: 'localhost';
+      $q_name   = $e($q['queue_name'] . '@' . $domain);
+      $strategy = $e($q['queue_strategy'] ?? 'ring-all');
+      $moh      = $e($q['queue_moh_sound'] ?? 'local_stream://moh');
+      $max_wait = (int)($q['queue_max_wait_time'] ?? 0);
+      $max_no_a = (int)($q['queue_max_wait_time_with_no_agent'] ?? 90);
+      $max_no_t = (int)($q['queue_max_wait_time_with_no_agent_time_reached'] ?? 30);
+      $discard  = (int)($q['queue_discard_abandoned_after'] ?? 900);
+      $time_bs  = $e($q['queue_time_base_score'] ?? 'queue');
+      $ann_snd  = $e($q['queue_announce_sound'] ?? '');
+      $ann_freq = (int)($q['queue_announce_frequency'] ?? 0);
+      $cid_pfx  = $e($q['queue_cid_prefix'] ?? '');
+      $tier_rul = ($q['queue_tier_rules_apply'] === 'true') ? 'true' : 'false';
+      $tier_wt  = (int)($q['queue_tier_rule_wait_second'] ?? 300);
+      $abnd_res = ($q['queue_abandoned_resume_allowed'] === 'true') ? 'true' : 'false';
+      $ring_prg = (int)($q['queue_ring_progressively_delay'] ?? 10);
+
+      $xml .= "\t\t<queue name=\"{$q_name}\">\n";
+      $xml .= "\t\t\t<param name=\"strategy\" value=\"{$strategy}\"/>\n";
+      $xml .= "\t\t\t<param name=\"moh-sound\" value=\"{$moh}\"/>\n";
+      $xml .= "\t\t\t<param name=\"time-base-score\" value=\"{$time_bs}\"/>\n";
+      $xml .= "\t\t\t<param name=\"max-wait-time\" value=\"{$max_wait}\"/>\n";
+      $xml .= "\t\t\t<param name=\"max-wait-time-with-no-agent\" value=\"{$max_no_a}\"/>\n";
+      $xml .= "\t\t\t<param name=\"max-wait-time-with-no-agent-time-reached\" value=\"{$max_no_t}\"/>\n";
+      $xml .= "\t\t\t<param name=\"discard-abandoned-after\" value=\"{$discard}\"/>\n";
+      $xml .= "\t\t\t<param name=\"abandoned-resume-allowed\" value=\"{$abnd_res}\"/>\n";
+      $xml .= "\t\t\t<param name=\"tier-rules-apply\" value=\"{$tier_rul}\"/>\n";
+      $xml .= "\t\t\t<param name=\"tier-rule-wait-second\" value=\"{$tier_wt}\"/>\n";
+      $xml .= "\t\t\t<param name=\"ring-progressively-delay\" value=\"{$ring_prg}\"/>\n";
+      if ($ann_snd !== '') {
+        $xml .= "\t\t\t<param name=\"announce-sound\" value=\"{$ann_snd}\"/>\n";
+        $xml .= "\t\t\t<param name=\"announce-frequency\" value=\"{$ann_freq}\"/>\n";
+      }
+      if ($cid_pfx !== '') {
+        $xml .= "\t\t\t<param name=\"cid-prefix\" value=\"{$cid_pfx}\"/>\n";
+      }
+      $xml .= "\t\t</queue>\n";
+    }
+
+    $xml .= "\t</queues>\n\t<agents>\n";
+
+    foreach ($agents as $a) {
+      $a_name    = $e($a['agent_name']);
+      $a_type    = $e($a['agent_type'] ?? 'callback');
+      $a_contact = $e($a['agent_contact'] ?? '');
+      $a_timeout = (int)($a['agent_call_timeout'] ?? 20);
+      $a_status  = $e($a['agent_status'] ?? 'Available');
+      $a_wrap    = (int)($a['agent_wrap_up_time'] ?? 10);
+      $a_max_na  = (int)($a['agent_max_no_answer'] ?? 3);
+
+      $xml .= "\t\t<agent name=\"{$a_name}\" type=\"{$a_type}\"";
+      $xml .= " contact=\"{$a_contact}\" status=\"{$a_status}\"";
+      $xml .= " call-timeout=\"{$a_timeout}\" wrap-up-time=\"{$a_wrap}\"";
+      $xml .= " max-no-answer=\"{$a_max_na}\"/>\n";
+    }
+
+    $xml .= "\t</agents>\n\t<tiers>\n";
+
+    foreach ($tiers as $t) {
+      // Find queue domain for @domain suffix
+      $q_domain = '';
+      foreach ($queues as $q) {
+        if ($q['call_center_queue_uuid'] === $t['call_center_queue_uuid']) {
+          $q_domain = '@' . ($q['domain_name'] ?: 'localhost');
+          break;
+        }
+      }
+      $t_queue  = $e($t['queue_name'] . $q_domain);
+      $t_agent  = $e($t['agent_name']);
+      $t_level  = (int)($t['tier_level'] ?? 1);
+      $t_pos    = (int)($t['tier_position'] ?? 1);
+
+      $xml .= "\t\t<tier queue=\"{$t_queue}\" agent=\"{$t_agent}\"";
+      $xml .= " level=\"{$t_level}\" position=\"{$t_pos}\"/>\n";
+    }
+
+    $xml .= "\t</tiers>\n</configuration>\n";
+
+    file_put_contents($conf_file, $xml);
   }
 
   private static function generate_uuid()

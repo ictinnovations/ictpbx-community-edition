@@ -35,3 +35,18 @@ vendor/phar-io/
 vendor/phpunit/
 vendor/sebastian/
 vendor/theseer/
+
+# Runtime-generated inbound route and ring group dialplan XMLs
+etc/freeswitch/dialplan/public/*.xml
+etc/freeswitch/dialplan/ring_groups/*.xml
+etc/freeswitch/dialplan/*.bak*
+
+
+# Runtime-generated per-module dialplan XMLs (Sprint 10+)
+etc/freeswitch/dialplan/call_flows/*.xml
+etc/freeswitch/dialplan/call_queues/*.xml
+etc/freeswitch/dialplan/ivr_menus/*.xml
+etc/freeswitch/dialplan/time_conditions/*.xml
+etc/freeswitch/dialplan/voicemails/*.xml
+etc/freeswitch/directory/voicemails/*.xml
+etc/freeswitch/directory/fpbx_extensions/*.xml

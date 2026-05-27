@@ -600,7 +600,6 @@ class Document extends Message
       Corelog::log("Failed to write encrypted file: $targetFile", Corelog::ERROR);
       return false;
     }
-    exec(\ICT\Core\sys_which('textfmt', 'usr/sbin') . " $targetFile");
     Corelog::log("Converting uploaded file into Encrypted file", Corelog::CRUD);
     exec("rm -rf '$sourceFile'");
   }

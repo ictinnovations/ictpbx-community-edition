@@ -167,6 +167,8 @@ class TimeCondition
     } catch (\PDOException $e) {
       throw new CoreException(500, 'Time Condition save failed: ' . $e->getMessage());
     }
+
+    $this->sync_fs_dialplan();
     return $this->dialplan_uuid;
   }
 
@@ -237,7 +239,59 @@ class TimeCondition
     } catch (\PDOException $e) {
       throw new CoreException(500, 'Time Condition delete failed: ' . $e->getMessage());
     }
+    $this->sync_fs_dialplan(true);
     return true;
+  }
+
+  private function sync_fs_dialplan($delete = false)
+  {
+    $dir  = '/usr/ictcore/etc/freeswitch/dialplan/time_conditions';
+    $file = $dir . '/' . $this->dialplan_uuid . '.xml';
+
+    if ($delete) {
+      if (file_exists($file)) @unlink($file);
+    } else {
+      if (!is_dir($dir)) @mkdir($dir, 0755, true);
+      $e    = fn($s) => htmlspecialchars((string)$s, ENT_XML1, 'UTF-8');
+      $ext  = $e($this->tc_extension ?? '');
+      $nm   = $e($this->tc_name ?? 'tc_' . $this->dialplan_uuid);
+      $uuid = $e($this->dialplan_uuid);
+
+      $time_range = ($this->tc_time_start ?: '00:00') . '-' . ($this->tc_time_stop ?: '23:59');
+      $wday_range = ($this->tc_wday_start ?: 'mon') . '-' . ($this->tc_wday_stop ?: 'fri');
+
+      // Strip any " XML <context>" suffix already in the stored destination
+      $open_dest   = preg_replace('/\s+XML\s+\S+$/i', '', (string)($this->tc_open_destination ?? ''));
+      $closed_dest = preg_replace('/\s+XML\s+\S+$/i', '', (string)($this->tc_closed_destination ?? ''));
+
+      $xml  = '<?xml version="1.0" encoding="utf-8"?>' . "\n<include>\n";
+      $xml .= "  <extension name=\"{$nm}\" continue=\"false\" uuid=\"{$uuid}\">\n";
+      $xml .= "    <condition field=\"destination_number\" expression=\"^{$ext}\$\">\n";
+      $xml .= "    </condition>\n";
+      $xml .= "    <condition field=\"time_of_day\" break=\"never\" expression=\"{$e($time_range)}\">\n";
+      $xml .= "    </condition>\n";
+      $xml .= "    <condition field=\"day_of_week\" break=\"never\" expression=\"{$e($wday_range)}\">\n";
+      if ($open_dest !== '') {
+        $xml .= "      <action application=\"transfer\" data=\"{$e($open_dest)} XML ictcore\"/>\n";
+      }
+      if ($closed_dest !== '') {
+        $xml .= "      <anti-action application=\"transfer\" data=\"{$e($closed_dest)} XML ictcore\"/>\n";
+      }
+      $xml .= "    </condition>\n";
+      $xml .= "  </extension>\n</include>\n";
+
+      file_put_contents($file, $xml);
+    }
+
+    @touch('/etc/freeswitch/dialplan/ictcore.xml');
+
+    try {
+      if (class_exists('\\ICT\\Core\\Realtime')) {
+        \ICT\Core\Realtime::run_cmd('reloadxml');
+      }
+    } catch (\Throwable $ex) {
+      Corelog::log("TimeCondition reloadxml failed: " . $ex->getMessage(), Corelog::WARNING);
+    }
   }
 
   private static function generate_uuid()

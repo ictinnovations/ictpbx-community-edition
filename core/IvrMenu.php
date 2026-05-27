@@ -136,6 +136,7 @@ class IvrMenu
     }
 
     $this->save_options($pdo);
+    $this->sync_fs_dialplan();
     return $this->ivr_menu_uuid;
   }
 
@@ -206,7 +207,86 @@ class IvrMenu
         ->execute(['uuid' => $uuid]);
     $pdo->prepare("DELETE FROM v_ivr_menus WHERE ivr_menu_uuid = :uuid")
         ->execute(['uuid' => $uuid]);
+    $this->sync_fs_dialplan(true);
     return true;
+  }
+
+  private function sync_fs_dialplan($delete = false)
+  {
+    $dp_dir   = '/usr/ictcore/etc/freeswitch/dialplan/ivr_menus';
+    $dp_file  = $dp_dir . '/' . $this->ivr_menu_uuid . '.xml';
+    $ivr_dir  = '/etc/freeswitch/ivr_menus';
+    $ivr_file = $ivr_dir . '/ivr_' . $this->ivr_menu_uuid . '.xml';
+    $menu_name = 'ivr_' . $this->ivr_menu_uuid;
+
+    if ($delete) {
+      if (file_exists($dp_file))  @unlink($dp_file);
+      if (file_exists($ivr_file)) @unlink($ivr_file);
+    } else {
+      if (!is_dir($dp_dir)) @mkdir($dp_dir, 0755, true);
+      $e   = fn($s) => htmlspecialchars((string)$s, ENT_XML1, 'UTF-8');
+      $ext = $e($this->ivr_menu_extension);
+      $nm  = $e($this->ivr_menu_name);
+      $mn  = $e($menu_name);
+
+      $dp_xml  = '<?xml version="1.0" encoding="utf-8"?>' . "\n<include>\n";
+      $dp_xml .= "  <extension name=\"{$nm}\" continue=\"false\" uuid=\"{$e($this->ivr_menu_uuid)}\">\n";
+      $dp_xml .= "    <condition field=\"destination_number\" expression=\"^{$ext}\$\">\n";
+      $dp_xml .= "      <action application=\"answer\"/>\n";
+      $dp_xml .= "      <action application=\"ivr\" data=\"{$mn}\"/>\n";
+      $dp_xml .= "    </condition>\n  </extension>\n</include>\n";
+      file_put_contents($dp_file, $dp_xml);
+
+      if (!is_dir($ivr_dir)) @mkdir($ivr_dir, 0755, true);
+      $greet_long  = $e($this->ivr_menu_greet_long  ?: 'ivr/ivr-welcome_to_freeswitch.wav');
+      $greet_short = $e($this->ivr_menu_greet_short ?: 'ivr/ivr-please_enter_the_extension_number.wav');
+      $invalid     = $e($this->ivr_menu_invalid_sound ?: 'ivr/ivr-that_was_an_invalid_entry.wav');
+      $exit_snd    = $e($this->ivr_menu_exit_sound  ?: 'ivr/ivr-thank_you.wav');
+      $timeout     = (int)($this->ivr_menu_timeout  ?: 10000);
+      $max_fail    = (int)($this->ivr_menu_max_failures ?: 3);
+      $max_to      = (int)($this->ivr_menu_max_timeouts ?: 3);
+
+      $ivr_xml  = '<?xml version="1.0" encoding="utf-8"?>' . "\n<include>\n";
+      $ivr_xml .= "  <menu name=\"{$mn}\"\n";
+      $ivr_xml .= "      greet-long=\"{$greet_long}\"\n";
+      $ivr_xml .= "      greet-short=\"{$greet_short}\"\n";
+      $ivr_xml .= "      invalid-sound=\"{$invalid}\"\n";
+      $ivr_xml .= "      exit-sound=\"{$exit_snd}\"\n";
+      $ivr_xml .= "      timeout=\"{$timeout}\"\n";
+      $ivr_xml .= "      max-failures=\"{$max_fail}\"\n";
+      $ivr_xml .= "      max-timeouts=\"{$max_to}\"\n";
+      $ivr_xml .= "      digit-len=\"1\">\n";
+
+      $opts = is_array($this->options) ? $this->options : $this->fetch_options();
+      foreach ($opts as $opt) {
+        $opt = (array)$opt;
+        if (($opt['ivr_menu_option_enabled'] ?? 'true') === 'false') continue;
+        $digits = $e($opt['ivr_menu_option_digits'] ?? '');
+        $action = $opt['ivr_menu_option_action'] ?? 'transfer';
+        $param  = $opt['ivr_menu_option_param']  ?? '';
+        $dest   = preg_replace('/\s+XML\s+\S+$/i', '', $param) ?: $param;
+        if ($action === 'transfer') {
+          $p = $e("transfer {$dest} XML ictcore");
+          $ivr_xml .= "    <entry action=\"menu-exec-app\" digits=\"{$digits}\" param=\"{$p}\"/>\n";
+        } elseif ($action === 'hangup') {
+          $ivr_xml .= "    <entry action=\"menu-exit\" digits=\"{$digits}\"/>\n";
+        } else {
+          $ivr_xml .= "    <entry action=\"menu-exec-app\" digits=\"{$digits}\" param=\"{$e($param)}\"/>\n";
+        }
+      }
+      $ivr_xml .= "  </menu>\n</include>\n";
+      file_put_contents($ivr_file, $ivr_xml);
+    }
+
+    @touch('/etc/freeswitch/dialplan/ictcore.xml');
+
+    try {
+      if (class_exists('\\ICT\\Core\\Realtime')) {
+        \ICT\Core\Realtime::run_cmd('reloadxml');
+      }
+    } catch (\Throwable $ex) {
+      Corelog::log("IVR reloadxml failed: " . $ex->getMessage(), Corelog::WARNING);
+    }
   }
 
   public function get_id() { return $this->ivr_menu_uuid; }

@@ -88,6 +88,12 @@ class Http extends Data implements AuthServer
       $credentials = $this->getBasic($auth_headers);
     }
 
+    // Fallback: accept username/password from POST body (used by FreeSWITCH gatewayhub callbacks)
+    if (empty($credentials['username']) && isset($_POST['username']) && isset($_POST['password'])) {
+      $auth_method = User::AUTH_TYPE_BASIC;
+      $credentials = array('username' => $_POST['username'], 'password' => $_POST['password']);
+    }
+
     if (method_exists($classObj, 'authenticate')) {
       return $classObj->authenticate($credentials, $auth_method);
     }

@@ -44,8 +44,23 @@ class CoreApi extends Api
     $this->_authorize('transmission_create');
     $this->_authorize('transmission_update');
 
+    // RestServer only fills the named 'data' param from POST body; all other POST params
+    // (gateway_flag, spool_id, application_id) arrive inside $data, not as direct params.
+    if (empty($gateway_flag) && isset($data['gateway_flag'])) $gateway_flag = $data['gateway_flag'];
+    if (empty($spool_id)    && isset($data['spool_id']))    $spool_id    = $data['spool_id'];
+    if (empty($application_id) && isset($data['application_id'])) $application_id = $data['application_id'];
+
+    // application_data is posted as a JSON string; decode it into an array for Application::result.
+    $application_data = $data;
+    if (isset($data['application_data']) && is_string($data['application_data'])) {
+      $decoded = json_decode($data['application_data'], true);
+      if (is_array($decoded)) {
+        $application_data = $decoded;
+      }
+    }
+
     // now process the main request
-    $oResponse = $this->process_response($spool_id, $application_id, $data, $gateway_flag);
+    $oResponse = $this->process_response($spool_id, $application_id, $application_data, $gateway_flag);
     // and publish output
     if (!empty($oResponse->application_data)) {
       echo $oResponse->application_data;
@@ -56,8 +71,11 @@ class CoreApi extends Api
     // normally it will be used with last application to collect results of originate like applications
     if (isset($data['extra']) && is_array($data['extra'])) {
       foreach ($data['extra'] as $aApp) {
+        $aAppData = isset($aApp['application_data']) && is_string($aApp['application_data'])
+          ? (json_decode($aApp['application_data'], true) ?: $aApp['application_data'])
+          : ($aApp['application_data'] ?? array());
         // no need to collect any type of output
-        $this->process_response($aApp['spool_id'], $aApp['application_id'], $aApp['application_data'], $aApp['gateway_flag']);
+        $this->process_response($aApp['spool_id'], $aApp['application_id'], $aAppData, $aApp['gateway_flag']);
       }
     }
     exit();

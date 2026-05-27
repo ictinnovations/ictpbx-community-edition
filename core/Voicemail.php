@@ -135,6 +135,7 @@ class Voicemail
       throw new CoreException(500, 'Voicemail save failed: ' . $e->getMessage());
     }
 
+    $this->sync_fs_dialplan();
     return $this->voicemail_uuid;
   }
 
@@ -160,7 +161,66 @@ class Voicemail
     )->execute([$this->voicemail_id, $this->domain_uuid]);
     $pdo->prepare("DELETE FROM v_voicemails WHERE voicemail_uuid = ?")
         ->execute([$this->voicemail_uuid]);
+    $this->sync_fs_dialplan(true);
     return true;
+  }
+
+  private function sync_fs_dialplan($delete = false)
+  {
+    $dp_dir   = '/usr/ictcore/etc/freeswitch/dialplan/voicemails';
+    $dp_file  = $dp_dir . '/' . $this->voicemail_uuid . '.xml';
+    $dir_dir  = '/usr/ictcore/etc/freeswitch/directory/voicemails';
+    $dir_file = $dir_dir . '/' . $this->voicemail_uuid . '.xml';
+
+    if ($delete) {
+      if (file_exists($dp_file))  @unlink($dp_file);
+      if (file_exists($dir_file)) @unlink($dir_file);
+    } else {
+      $domain   = FpbxDomain::get_domain_name($this->domain_uuid) ?: 'localhost';
+      $vm_id    = htmlspecialchars((string)$this->voicemail_id, ENT_XML1, 'UTF-8');
+      $e_dom    = htmlspecialchars($domain, ENT_XML1, 'UTF-8');
+      $vm_pass  = htmlspecialchars((string)($this->voicemail_password ?: $this->voicemail_id), ENT_XML1, 'UTF-8');
+      $vm_email = htmlspecialchars((string)($this->voicemail_mail_to ?: ''), ENT_XML1, 'UTF-8');
+      $attach   = ($this->voicemail_file === 'attach') ? 'true' : 'false';
+      $keep     = ($this->voicemail_local_after_email) ? 'true' : 'false';
+
+      // Dialplan entry: route *99<id> to voicemail app
+      if (!is_dir($dp_dir)) @mkdir($dp_dir, 0755, true);
+      $dp_xml  = '<?xml version="1.0" encoding="utf-8"?>' . "\n<include>\n";
+      $dp_xml .= "  <extension name=\"voicemail_{$vm_id}\" continue=\"false\">\n";
+      $dp_xml .= "    <condition field=\"destination_number\" expression=\"^\\*99{$vm_id}\$\">\n";
+      $dp_xml .= "      <action application=\"answer\"/>\n";
+      $dp_xml .= "      <action application=\"voicemail\" data=\"default {$e_dom} {$vm_id}\"/>\n";
+      $dp_xml .= "    </condition>\n  </extension>\n</include>\n";
+      file_put_contents($dp_file, $dp_xml);
+
+      // Directory entry: plain <user> element, included by ictcore_voicemails.xml inside <users> block
+      if (!is_dir($dir_dir)) @mkdir($dir_dir, 0755, true);
+      $dir_xml  = "<user id=\"{$vm_id}\">\n";
+      $dir_xml .= "  <params>\n";
+      $dir_xml .= "    <param name=\"vm-password\" value=\"{$vm_pass}\"/>\n";
+      $dir_xml .= "    <param name=\"vm-mailto\" value=\"{$vm_email}\"/>\n";
+      $dir_xml .= "    <param name=\"vm-attach-file\" value=\"{$attach}\"/>\n";
+      $dir_xml .= "    <param name=\"vm-keep-local-after-email\" value=\"{$keep}\"/>\n";
+      $dir_xml .= "  </params>\n";
+      $dir_xml .= "  <variables>\n";
+      $dir_xml .= "    <variable name=\"domain_name\" value=\"{$e_dom}\"/>\n";
+      $dir_xml .= "    <variable name=\"user_context\" value=\"ictcore\"/>\n";
+      $dir_xml .= "  </variables>\n";
+      $dir_xml .= "</user>\n";
+      file_put_contents($dir_file, $dir_xml);
+    }
+
+    @touch('/etc/freeswitch/dialplan/ictcore.xml');
+    @touch('/etc/freeswitch/directory/fpbx_webrtc.xml');
+
+    try {
+      if (class_exists('\\ICT\\Core\\Realtime')) {
+        \ICT\Core\Realtime::run_cmd('reloadxml');
+      }
+    } catch (\Throwable $ex) {
+      Corelog::log("Voicemail reloadxml failed: " . $ex->getMessage(), Corelog::WARNING);
+    }
   }
 
   private static function generate_uuid()

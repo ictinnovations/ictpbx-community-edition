@@ -47,16 +47,37 @@ class InboundRoute
     if (!empty($this->destination_data)) {
       $parts = explode(' ', $this->destination_data);
       $this->destination_target = $parts[0] ?? null;
-      // Detect type from prefix
       if (!empty($this->destination_target)) {
         if (strpos($this->destination_target, '*99') === 0) {
           $this->destination_target_type = 'voicemail';
           $this->destination_target = substr($this->destination_target, 3);
         } else {
-          $this->destination_target_type = 'extension';
+          // Cross-reference PG tables to determine correct type
+          $this->destination_target_type = $this->detect_target_type(
+            $this->destination_target, $this->domain_uuid, $pdo
+          );
         }
       }
     }
+  }
+
+  private function detect_target_type(string $target, ?string $domain_uuid, PDO $pdo): string
+  {
+    if (empty($target) || empty($domain_uuid)) return 'extension';
+
+    $stmt = $pdo->prepare(
+      "SELECT 1 FROM v_ivr_menus WHERE ivr_menu_extension = :ext AND domain_uuid = :dom LIMIT 1"
+    );
+    $stmt->execute(['ext' => $target, 'dom' => $domain_uuid]);
+    if ($stmt->fetch()) return 'ivr';
+
+    $stmt = $pdo->prepare(
+      "SELECT 1 FROM v_ring_groups WHERE ring_group_extension = :ext AND domain_uuid = :dom LIMIT 1"
+    );
+    $stmt->execute(['ext' => $target, 'dom' => $domain_uuid]);
+    if ($stmt->fetch()) return 'ring_group';
+
+    return 'extension';
   }
 
   public static function search($aFilter = [])
@@ -99,10 +120,9 @@ class InboundRoute
       $this->destination_data = $transfer_target . ' XML ' . $domain_name;
     }
 
-    // Build number regex if not provided
-    if (empty($this->destination_number_regex)) {
-      $this->destination_number_regex = '^' . preg_quote($this->destination_number, '/') . '$';
-    }
+    // Always rebuild regex from destination_number to ensure correct +? prefix
+    $normalized = ltrim($this->destination_number, '+');
+    $this->destination_number_regex = '^\+?' . preg_quote($normalized, '/') . '$';
 
     // Generate UUIDs
     if (empty($this->destination_uuid)) {
@@ -196,6 +216,23 @@ class InboundRoute
     } catch (\PDOException $e) {
       throw new CoreException(500, 'Inbound Route save failed: ' . $e->getMessage());
     }
+
+    // Build static XML for FreeSWITCH using ictcore context, then write file
+    $static_transfer_data = preg_replace('/\s+XML\s+\S+$/', ' XML ictcore', $this->destination_data);
+    if ($static_transfer_data === $this->destination_data) {
+      // destination_data had no "XML <context>" suffix — append ictcore context
+      $static_transfer_data = $this->destination_data . ' XML ictcore';
+    }
+    $static_xml = $this->build_dialplan_xml(
+      $this->destination_uuid,
+      $this->destination_number,
+      $this->destination_number_regex,
+      $static_transfer_data,
+      $this->domain_uuid,
+      $domain_name
+    );
+    $this->sync_fs_dialplan($static_xml);
+
     return $this->destination_uuid;
   }
 
@@ -227,10 +264,50 @@ class InboundRoute
     }
     $pdo->prepare("DELETE FROM v_destinations WHERE destination_uuid = :uuid")
         ->execute(['uuid' => $this->destination_uuid]);
+    $this->sync_fs_dialplan(null, true);
     return true;
   }
 
   public function get_id() { return $this->destination_uuid; }
+
+  private function sync_fs_dialplan($dialplan_xml = null, $delete = false)
+  {
+    $dir  = '/usr/ictcore/etc/freeswitch/dialplan/public';
+    $safe = preg_replace('/[^a-zA-Z0-9_\-]/', '_', (string)$this->destination_number);
+    $file = $dir . '/' . $safe . '.xml';
+
+    if ($delete) {
+      if (file_exists($file)) {
+        @unlink($file);
+        Corelog::log("Inbound route XML removed: $file", Corelog::CRUD);
+      }
+    } else {
+      if (!is_dir($dir)) {
+        @mkdir($dir, 0755, true);
+      }
+      $xml  = '<?xml version="1.0" encoding="utf-8"?>' . "\n";
+      $xml .= '<include>' . "\n";
+      $xml .= '  ' . $dialplan_xml . "\n";
+      $xml .= '</include>' . "\n";
+      $written = file_put_contents($file, $xml);
+      if ($written === false) {
+        Corelog::log("Inbound route XML write FAILED: $file", Corelog::ERROR);
+        throw new CoreException(500, "Failed to write dialplan XML to $file — check file permissions");
+      }
+      Corelog::log("Inbound route XML written: $file", Corelog::CRUD);
+    }
+
+    // Touch the parent ictcore.xml so FS re-expands the X-PRE-PROCESS glob on reloadxml
+    @touch('/etc/freeswitch/dialplan/ictcore.xml');
+
+    try {
+      if (class_exists('\\ICT\\Core\\Realtime')) {
+        \ICT\Core\Realtime::run_cmd('reloadxml');
+      }
+    } catch (\Throwable $e) {
+      Corelog::log("reloadxml failed: " . $e->getMessage(), Corelog::WARNING);
+    }
+  }
 
   private function generate_uuid()
   {

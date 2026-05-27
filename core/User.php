@@ -628,6 +628,13 @@ class User
     return $this->user_id;
   }
 
+  private function set_role_id($role_id)
+  {
+    if (!empty($role_id)) {
+      $this->role_id = (int)$role_id;
+    }
+  }
+
   private function set_username($username)
   {
     if (empty($this->username)) {

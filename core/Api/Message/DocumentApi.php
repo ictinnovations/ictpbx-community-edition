@@ -132,8 +132,7 @@ class DocumentApi extends Api
       $page_no     = isset($query['page']) ? $query['page'] : 1;
       $output_file = $oDocument->create_jpg($oDocument->file_name, $page_no);
     } else {
-      // $output_file = $oDocument->create_pdf($oDocument->file_name, 'tif');
-      $output_file = $oDocument->create_pdf($oDocument->file_name, 'aes');
+      $output_file = $oDocument->create_pdf($oDocument->file_name, 'tif');
     }
     if (file_exists($output_file)) {
       $oFile = new SplFileInfo($output_file);

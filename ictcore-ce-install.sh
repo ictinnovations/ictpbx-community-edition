@@ -321,7 +321,8 @@ dnf install -y \
     freeswitch-lua \
     freeswitch-application-curl \
     freeswitch-sounds-en-us-callie-8000 \
-    freeswitch-asrtts-flite
+    freeswitch-asrtts-flite \
+    freeswitch-lang-en
 
 # Optional codec packages — best-effort; not all repos carry every RPM.
 dnf install -y freeswitch-codec-opus freeswitch-codec-bcg729 2>/dev/null \
@@ -517,6 +518,48 @@ else
     ok "webrtc.xml SIP profile updated (codec prefs: opus,PCMA,PCMU)"
 fi
 
+# Disable Lua xml_handler bindings — they fail with "SQLite unable to open database file"
+# on every call (mod_pgsql missing). FS already falls back to static XML; disabling
+# eliminates per-call error spam and Lua overhead.
+LUA_CONF=/etc/freeswitch/autoload_configs/lua.conf.xml
+if [[ -f "$LUA_CONF" ]]; then
+    sed -i 's|^\s*<param name="xml-handler-script".*|    <!-- xml-handler-script disabled: FS uses static XML exclusively -->|' "$LUA_CONF"
+    sed -i 's|^\s*<param name="xml-handler-bindings".*|    <!-- xml-handler-bindings disabled -->|' "$LUA_CONF"
+    ok "lua.conf.xml: xml-handler-script/bindings disabled (static XML only)"
+fi
+
+# conference.conf and local_stream.conf must have .xml extension for FS static config loader.
+for CONF in conference local_stream; do
+    SRC="/etc/freeswitch/autoload_configs/${CONF}.conf"
+    DST="/etc/freeswitch/autoload_configs/${CONF}.conf.xml"
+    [[ -f "$SRC" && ! -f "$DST" ]] && cp "$SRC" "$DST" && ok "${CONF}.conf.xml created"
+done
+
+# FreeSWITCH user directory — two-group domain declaration required by mod_voicemail.
+# mod_voicemail does a domain-scoped user lookup; voicemail users must live inside the
+# same <domain> element as extensions (a separate domain in another file is NOT merged).
+FS_WEBRTC_USERS=/etc/freeswitch/directory/fpbx_webrtc.xml
+if [[ ! -f "$FS_WEBRTC_USERS" ]]; then
+    cat > "$FS_WEBRTC_USERS" << WEBRTCUSERS
+<include>
+  <domain name="${PUBLIC_HOST}">
+    <params>
+      <param name="dial-string" value="{presence_id=\${dialed_user}@\${dialed_domain}}\${sofia_contact(*\/\${dialed_user}@\${dialed_domain})}"/>
+    </params>
+    <groups>
+      <group name="default"><users>
+        <X-PRE-PROCESS cmd="include" data="$ICTCORE_DIR/etc/freeswitch/directory/fpbx_extensions/*.xml"/>
+      </users></group>
+      <group name="voicemails"><users>
+        <X-PRE-PROCESS cmd="include" data="$ICTCORE_DIR/etc/freeswitch/directory/voicemails/*.xml"/>
+      </users></group>
+    </groups>
+  </domain>
+</include>
+WEBRTCUSERS
+    ok "fpbx_webrtc.xml domain directory created (domain=${PUBLIC_HOST})"
+fi
+
 # Reload FreeSWITCH XML so the internal profile picks up the certificate and starts.
 fs_cli -p "$ESL_PASS" -x 'reloadxml' >/dev/null 2>&1 || true
 fs_cli -p "$ESL_PASS" -x 'sofia profile internal start' >/dev/null 2>&1 || true
@@ -699,13 +742,40 @@ else
 fi
 
 chown -R ictcore:ictcore "$ICTCORE_DIR"
-ok "Ownership set: ictcore:ictcore"
+# data/ subdirs may be populated after the main chown — re-apply explicitly
+chown -R ictcore:ictcore "$ICTCORE_DIR/data"
+mkdir -p /var/log/ictcore && chown ictcore:ictcore /var/log/ictcore
+ok "Ownership set: ictcore:ictcore (including data/, /var/log/ictcore)"
 
 # FreeSWITCH config symlinks
 ln -sf "$ICTCORE_DIR/etc/freeswitch/dialplan/ictcore.xml"     /etc/freeswitch/dialplan/ictcore.xml
 ln -sf "$ICTCORE_DIR/etc/freeswitch/sip_profiles/ictcore.xml" /etc/freeswitch/sip_profiles/ictcore.xml
 ln -sf "$ICTCORE_DIR/etc/freeswitch/directory/ictcore.xml"    /etc/freeswitch/directory/ictcore.xml
 ok "FreeSWITCH config symlinks created"
+
+# Pre-create fpbx_extensions dir as ictcore so php-fpm (running as ictcore) can write XML files
+mkdir -p "$ICTCORE_DIR/etc/freeswitch/directory/fpbx_extensions"
+chown ictcore:ictcore "$ICTCORE_DIR/etc/freeswitch/directory/fpbx_extensions"
+
+# Pre-create dialplan subdirs for static XML written by PBX modules at runtime
+mkdir -p "$ICTCORE_DIR/etc/freeswitch/dialplan/ring_groups"
+mkdir -p "$ICTCORE_DIR/etc/freeswitch/dialplan/public"
+mkdir -p "$ICTCORE_DIR/etc/freeswitch/dialplan/ivr_menus"
+mkdir -p "$ICTCORE_DIR/etc/freeswitch/dialplan/call_flows"
+mkdir -p "$ICTCORE_DIR/etc/freeswitch/dialplan/call_queues"
+mkdir -p "$ICTCORE_DIR/etc/freeswitch/dialplan/time_conditions"
+mkdir -p "$ICTCORE_DIR/etc/freeswitch/dialplan/voicemails"
+mkdir -p "$ICTCORE_DIR/etc/freeswitch/directory/voicemails"
+mkdir -p /etc/freeswitch/ivr_menus
+chown ictcore:ictcore "$ICTCORE_DIR/etc/freeswitch/dialplan/ring_groups" \
+                      "$ICTCORE_DIR/etc/freeswitch/dialplan/public" \
+                      "$ICTCORE_DIR/etc/freeswitch/dialplan/ivr_menus" \
+                      "$ICTCORE_DIR/etc/freeswitch/dialplan/call_flows" \
+                      "$ICTCORE_DIR/etc/freeswitch/dialplan/call_queues" \
+                      "$ICTCORE_DIR/etc/freeswitch/dialplan/time_conditions" \
+                      "$ICTCORE_DIR/etc/freeswitch/dialplan/voicemails" \
+                      "$ICTCORE_DIR/etc/freeswitch/directory/voicemails" \
+                      /etc/freeswitch/ivr_menus
 
 # ictpbx.xml dial-string fixes for WebRTC/JsSIP compatibility:
 #   1. Remove ,${verto_contact(...)} — mod_verto not loaded; causes bridge errors
@@ -943,7 +1013,9 @@ private_key  = /usr/ictcore/etc/ssh/ib_node
 public_key   = /usr/ictcore/etc/ssh/ib_node.pub
 
 [gatewayhub]
-url =
+url      = http://127.0.0.1/api/responses
+username = admin@ictcore.org
+password = ${ICTCORE_ADMIN_PASS}
 
 [node]
 id = 1
@@ -1006,6 +1078,13 @@ if [[ -n "$PUBLIC_DOMAIN" && -f "$FS_WEBRTC" ]]; then
     fi
     sed -i "s|<param name=\"force-register-domain\" value=\"[^\"]*\"/>|<param name=\"force-register-domain\" value=\"$PUBLIC_DOMAIN\"/>|" "$FS_WEBRTC"
     ok "webrtc.xml: wss-binding :5067 added, force-register-domain=$PUBLIC_DOMAIN"
+fi
+
+# Update fpbx_webrtc.xml domain name to PUBLIC_DOMAIN when HTTPS is configured.
+# Must match force-register-domain so sofia_contact() lookups find registered extensions.
+if [[ -n "$PUBLIC_DOMAIN" && -f "${FS_WEBRTC_USERS:-/etc/freeswitch/directory/fpbx_webrtc.xml}" ]]; then
+    sed -i "s|<domain name=\"[^\"]*\">|<domain name=\"$PUBLIC_DOMAIN\">|" /etc/freeswitch/directory/fpbx_webrtc.xml
+    ok "fpbx_webrtc.xml: domain updated to $PUBLIC_DOMAIN"
 fi
 
 # ICTCore's Conf\File class defaults to /etc/ictcore.conf — symlink it.
@@ -1202,6 +1281,10 @@ ok "php-fpm PrivateTmp=false override written"
 # ICTCore (ictcore user) must be in the daemon group to read them.
 usermod -a -G daemon ictcore 2>/dev/null || true
 ok "ictcore user added to daemon group (FreeSWITCH TIFF read access)"
+# FreeSWITCH Lua reads /usr/ictcore/etc/ictcore.conf (mode 640, owned ictcore:ictcore).
+# Add freeswitch to the ictcore group so Lua can read it without making it world-readable.
+usermod -a -G ictcore freeswitch 2>/dev/null || true
+ok "freeswitch user added to ictcore group (ictcore.conf read access for Lua)"
 
 # SELinux: allow Apache to write (log, cache)
 setsebool -P httpd_unified 1 &>/dev/null || true
@@ -1362,9 +1445,20 @@ else
 fi
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# STEP 17 — CDR ETL cron job
+# STEP 17 — ICTCore cron + CDR ETL cron job
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-hdr "Step 17: CDR ETL cron job"
+hdr "Step 17: ICTCore cron + CDR ETL cron job"
+
+# ICTCore main cron — runs cron.php every minute for task/spool processing.
+# Without this, queued transmissions never execute.
+ICTCORE_CRON=/etc/cron.d/ictcore
+if [[ -f "$ICTCORE_CRON" ]]; then
+    ok "ICTCore cron already present at $ICTCORE_CRON"
+else
+    cp "$ICTCORE_DIR/etc/ictcore.cron" "$ICTCORE_CRON"
+    chmod 644 "$ICTCORE_CRON"
+    ok "ICTCore cron installed at $ICTCORE_CRON"
+fi
 
 CDR_CRON=/etc/cron.d/ictpbx-cdr
 if [[ -f "$CDR_CRON" ]]; then
