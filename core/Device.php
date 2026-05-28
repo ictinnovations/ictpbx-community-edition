@@ -18,6 +18,8 @@ class Device
   public $device_password           = null;
   public $device_description        = null;
   public $device_enabled            = true;
+  public $device_profile_uuid       = null;
+  public $device_serial_number      = null;
 
   public function __construct($device_uuid = null)
   {
@@ -45,19 +47,22 @@ class Device
 
   public static function search($aFilter = array())
   {
-    $tenant_id   = $aFilter['tenant_id'] ?? null;
+    $tenant_id     = $aFilter['tenant_id'] ?? null;
     $domain_filter = FpbxDomain::get_domain_filter($tenant_id); /* domain-filter-v2 */
     if ($domain_filter === false) return [];
     $params = $domain_filter ? ['domain_uuid' => $domain_filter] : [];
-    $where  = $domain_filter ? 'WHERE domain_uuid = :domain_uuid' : '';
-    $pdo         = FpbxDomain::fpbx_db();
-    $stmt = $pdo->prepare(
-      "SELECT device_uuid, device_address, device_label, device_vendor,
-              device_model, device_template, device_location,
-              device_enabled, device_description
-       FROM v_devices
+    $where  = $domain_filter ? 'WHERE d.domain_uuid = :domain_uuid' : '';
+    $pdo    = FpbxDomain::fpbx_db();
+    $stmt   = $pdo->prepare(
+      "SELECT d.device_uuid, d.device_address, d.device_label, d.device_vendor,
+              d.device_model, d.device_template, d.device_location,
+              d.device_enabled, d.device_description,
+              d.device_profile_uuid, d.device_serial_number,
+              p.device_profile_name
+       FROM v_devices d
+       LEFT JOIN v_device_profiles p ON p.device_profile_uuid = d.device_profile_uuid
        " . $where . " /* sql-where-v2 */
-       ORDER BY device_label ASC, device_address ASC"
+       ORDER BY d.device_label ASC, d.device_address ASC"
     );
     $stmt->execute($params);
     return $stmt->fetchAll();
@@ -74,6 +79,8 @@ class Device
     }
 
     if (!empty($this->device_address)) {
+      // Normalize MAC: strip separators, lowercase — provision/index.php requires this format
+      $this->device_address = strtolower(preg_replace('/[^a-fA-F0-9]/', '', $this->device_address));
       $macCheck = $pdo->prepare(
         "SELECT COUNT(*) FROM v_devices WHERE device_address = ? AND device_uuid != ?"
       );
@@ -87,6 +94,7 @@ class Device
       'device_address', 'device_label', 'device_vendor', 'device_model',
       'device_template', 'device_firmware_version', 'device_location',
       'device_username', 'device_password', 'device_description', 'device_enabled',
+      'device_profile_uuid', 'device_serial_number',
     ];
 
     if (empty($this->device_uuid)) {

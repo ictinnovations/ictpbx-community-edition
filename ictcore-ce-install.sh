@@ -685,6 +685,21 @@ SELECT gen_random_uuid(), '${SEED_DOMAIN:-localhost}', 'true'
  WHERE NOT EXISTS (SELECT 1 FROM v_domains);
 SQL
 
+# #29 — Enable phone auto-provisioning in FusionPBX.
+# provision/index.php returns 403 for all MACs until this row exists.
+PGPASSWORD="$PG_FUSIONPBX_PASS" psql -h 127.0.0.1 -U fusionpbx -d fusionpbx <<SQL2 >>"$LOG" 2>&1 \
+    && ok "Provisioning enabled in v_default_settings (or already present)" \
+    || warn "Provisioning seed failed (non-fatal)"
+INSERT INTO v_default_settings
+  (default_setting_uuid, default_setting_category, default_setting_subcategory,
+   default_setting_name, default_setting_value, default_setting_enabled)
+SELECT gen_random_uuid(), 'provision', 'enabled', 'boolean', 'true', true
+ WHERE NOT EXISTS (
+   SELECT 1 FROM v_default_settings
+   WHERE default_setting_category='provision' AND default_setting_subcategory='enabled'
+ );
+SQL2
+
 # Capture the first active domain_uuid so we can link tenant_id=1 to it
 # after the MariaDB tenant table exists (audit gap #5).
 FPBX_DOMAIN_UUID=$(PGPASSWORD="$PG_FUSIONPBX_PASS" psql -h 127.0.0.1 -U fusionpbx -d fusionpbx \
@@ -1369,6 +1384,19 @@ if [[ -n "$PUBLIC_DOMAIN" ]]; then
     RewriteRule ^/ws(/.*)?$ wss://127.0.0.1:5067/\$1 [P,L]
     ProxyPass /ws/ wss://127.0.0.1:5067/
     ProxyPassReverse /ws/ wss://127.0.0.1:5067/
+
+    # Phone auto-provisioning — HTTPS only (phones must use TLS for credential security)
+    Alias /provision /var/www/fusionpbx/app/provision
+    <Directory /var/www/fusionpbx/app/provision>
+        Options -Indexes
+        AllowOverride All
+        Require all granted
+    </Directory>
+    <Directory /var/www/fusionpbx>
+        Options -Indexes
+        AllowOverride All
+        Require all granted
+    </Directory>
 
     ErrorLog  /var/log/httpd/ictpbx_ssl_error.log
     CustomLog /var/log/httpd/ictpbx_ssl_access.log combined
