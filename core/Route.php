@@ -221,6 +221,14 @@ class Route
    */
   private function publish_to_fusionpbx()
   {
+    // Only voice routes feed the registered-extension outbound dialplan in FusionPBX.
+    // Fax/SMS/email routes are consumed by ICTCore's service-specific spool logic
+    // (Route::getRoutes filtered by service_flag), never by extension dial-out.
+    if ((((int) $this->service_flag) & 1) === 0) {
+      Corelog::log("Route publish skipped: non-voice service_flag={$this->service_flag}", Corelog::WARNING);
+      return;
+    }
+
     if (empty($this->destination_id) || empty($this->provider_id)) {
       Corelog::log("Route publish skipped: missing destination_id or provider_id", Corelog::WARNING);
       return;

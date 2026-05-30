@@ -329,6 +329,11 @@ dnf install -y freeswitch-codec-opus freeswitch-codec-bcg729 2>/dev/null \
     && ok "Opus + bcg729 codec packages installed" \
     || warn "freeswitch-codec-opus/bcg729 not in repo — WebRTC will fall back to PCMU/PCMA"
 
+# xml_cdr module — required for v_xml_cdr population (PBX CDR page)
+dnf install -y freeswitch-xml-cdr 2>/dev/null \
+    && ok "freeswitch-xml-cdr installed" \
+    || warn "freeswitch-xml-cdr not in repo — PBX CDR page will be empty"
+
 # okay.com.mx FreeSWITCH RPMs do not ship a systemd unit. Create the
 # freeswitch:daemon user/group the unit expects, then write the unit file
 # matching EE prod 66.42.114.181's working configuration.
@@ -412,6 +417,13 @@ if [[ ! -f "$FS_OPUS" ]]; then
 </configuration>
 OPUSCONF
     ok "opus.conf.xml written (VBR + FEC enabled)"
+fi
+
+# Enable xml_cdr to POST to FusionPBX CDR import endpoint (populates v_xml_cdr)
+XML_CDR_CONF=/etc/freeswitch/autoload_configs/xml_cdr.conf.xml
+if [[ -f "$XML_CDR_CONF" ]]; then
+    sed -i 's|<!--<param name="url" value="http://127.0.0.1/app/xml_cdr/xml_cdr_import.php"/>-->|<param name="url" value="http://127.0.0.1/app/xml_cdr/xml_cdr_import.php"/>|' "$XML_CDR_CONF"
+    ok "xml_cdr.conf.xml: FusionPBX CDR import URL enabled"
 fi
 
 # Raise sessions-per-second from default 30 to 100 — default causes
