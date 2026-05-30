@@ -1203,6 +1203,14 @@ if [[ -f /usr/ictpbxx/dist/index.html ]]; then
         Require all granted
     </Directory>
 
+    # PWA service-worker control files must never be cached, or browsers keep
+    # serving a stale app shell after a deploy.
+    <FilesMatch "^(ngsw-worker\.js|ngsw\.json|safety-worker\.js|worker-basic\.min\.js|index\.html)$">
+        Header set Cache-Control "no-cache, no-store, must-revalidate"
+        Header set Pragma "no-cache"
+        Header set Expires "0"
+    </FilesMatch>
+
     # ICTCore REST API under /api
     Alias /api /usr/ictcore/wwwroot
     <Directory /usr/ictcore/wwwroot>
@@ -1373,6 +1381,13 @@ if [[ -n "$PUBLIC_DOMAIN" ]]; then
         AllowOverride All
         Require all granted
     </Directory>
+
+    # PWA service-worker control files must never be cached.
+    <FilesMatch "^(ngsw-worker\.js|ngsw\.json|safety-worker\.js|worker-basic\.min\.js|index\.html)\$">
+        Header set Cache-Control "no-cache, no-store, must-revalidate"
+        Header set Pragma "no-cache"
+        Header set Expires "0"
+    </FilesMatch>
 
     Alias /api /usr/ictcore/wwwroot
     <Directory /usr/ictcore/wwwroot>
