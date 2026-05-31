@@ -39,6 +39,13 @@ class Extensions_cdrApi extends Api
       } else {
         return []; // tenant has no PBX domain — no CDR to show
       }
+    } else if (!empty($filter['tenant_id'])) {
+      // Admin filtering by a specific tenant -> resolve to its FusionPBX domain
+      $domain_uuid = FpbxDomain::get_domain_uuid((int) $filter['tenant_id']);
+      $domain_name = $domain_uuid ? FpbxDomain::get_domain_name($domain_uuid) : null;
+      if ($domain_name) {
+        $filter['domain'] = $domain_name;
+      }
     }
 
     return Extensions_cdr::search($filter);

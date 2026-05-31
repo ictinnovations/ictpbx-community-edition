@@ -498,6 +498,15 @@ class Provider
         @unlink($file);
         Corelog::log("Gateway XML removed: $file", Corelog::CRUD);
       }
+      // Unregister the live gateway so FreeSWITCH drops its REGISTER session
+      // immediately; rescan alone leaves a stale registered gateway behind.
+      try {
+        if (class_exists('\\ICT\\Core\\Realtime')) {
+          \ICT\Core\Realtime::run_cmd('sofia profile ictcore killgw ' . $safe);
+        }
+      } catch (\Throwable $e) {
+        Corelog::log("sofia killgw failed: " . $e->getMessage(), Corelog::WARNING);
+      }
     } else {
       $register    = ((int)$this->register === 1 || $this->register === 'true') ? 'true' : 'false';
       $proxy       = !empty($this->proxy)       ? $this->proxy       : $this->host;

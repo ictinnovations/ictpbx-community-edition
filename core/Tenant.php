@@ -34,7 +34,9 @@ class Tenant {
       'active',
       'credit',
       'daily_limit',
-      'monthly_limit'
+      'monthly_limit',
+      'credit_alert_threshold',
+      'max_concurrent_calls'
   );
   private static $read_only = array(
       'tenant_id',
@@ -81,6 +83,12 @@ class Tenant {
 
   /** @var string */
   public $monthly_limit = NULL;
+
+  /** @var float */
+  public $credit_alert_threshold = 0;
+
+  /** @var integer */
+  public $max_concurrent_calls = 0;
 
   /** @var integer */
   public $owner_id = null;
@@ -204,6 +212,8 @@ class Tenant {
       $this->credit = $data['credit'];
       $this->daily_limit = $data['daily_limit'];
       $this->monthly_limit = $data['monthly_limit'];
+      $this->credit_alert_threshold = $data['credit_alert_threshold'] ?? 0;
+      $this->max_concurrent_calls = $data['max_concurrent_calls'] ?? 0;
       $this->daily_sent = $data['daily_sent'];
       $this->monthly_sent = $data['monthly_sent'];
       $this->assigned_daily = $data['assigned_daily'];
@@ -321,7 +331,9 @@ class Tenant {
         'active' => $this->active,
         'credit' => $this->credit,
         'daily_limit' => $this->daily_limit,
-        'monthly_limit' => $this->monthly_limit
+        'monthly_limit' => $this->monthly_limit,
+        'credit_alert_threshold' => $this->credit_alert_threshold,
+        'max_concurrent_calls' => $this->max_concurrent_calls
     );
 
     if (isset($data['tenant_id']) && !empty($data['tenant_id'])) {

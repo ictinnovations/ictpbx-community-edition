@@ -21,5 +21,9 @@ ALTER TABLE cdr_lega
   ADD INDEX IF NOT EXISTS idx_start_time (start_time),
   ADD INDEX IF NOT EXISTS idx_domain_start (domain, start_time);
 
+-- cdr_legb: idx_call_id for the join; idx_start_time so the Extensions CDR
+-- report (cdr_legb-driven, ORDER BY start_time DESC + LIMIT) uses the index
+-- instead of a full scan + filesort over ~391k rows.
 ALTER TABLE cdr_legb
-  ADD INDEX IF NOT EXISTS idx_call_id (call_id);
+  ADD INDEX IF NOT EXISTS idx_call_id    (call_id),
+  ADD INDEX IF NOT EXISTS idx_start_time (start_time);
