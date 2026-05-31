@@ -1,0 +1,9 @@
+191,usa 191,60,1.50,60,60
+121,usa 121,60,1,60,60
+
+
+
+# ONLY FOR REFERENCE
+# REMOVE THESE LINES BEFORE IMPORT
+# destination_prefix,rate_name,billing_block,rate,first_block,incremental_interval
+
