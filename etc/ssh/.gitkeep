@@ -1,0 +1,7 @@
+# This directory holds host-specific runtime artifacts:
+#   - ib_node, ib_node.pub, ib_node.pem, ib_node.crt  (JWT RS256 keypair)
+#   - authorized_keys, config, known_hosts            (SSH metadata)
+#
+# Everything in this directory is gitignored except this placeholder.
+# The installer scripts (ictcore-install.sh / ictcore-ce-install.sh)
+# generate the JWT keypair on first run via ssh-keygen.
