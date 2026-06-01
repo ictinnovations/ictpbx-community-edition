@@ -165,6 +165,13 @@ quiet dnf install -y git curl wget unzip tar jq openssl \
 quiet systemctl enable --now sendmail
 ok "Base utilities installed"
 
+# Document/fax conversion toolchain. Document download decrypts the stored .aes,
+# rasterises it to TIFF, then runs tiff2pdf; office uploads convert via libreoffice.
+# Without these, every document view/download throws 404 "Document media not found".
+info "Installing document/fax conversion toolchain..."
+quiet dnf install -y libtiff-tools ImageMagick ghostscript libreoffice-core
+ok "Document conversion toolchain installed (tiff2pdf, convert, gs, libreoffice)"
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # STEP 2 — Apache
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
