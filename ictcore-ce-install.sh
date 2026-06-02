@@ -1163,10 +1163,13 @@ if command -v getenforce &>/dev/null && [[ "$(getenforce)" != "Disabled" ]]; the
             semanage fcontext -m -t httpd_sys_rw_content_t "$ICTCORE_DIR/etc/freeswitch(/.*)?" 2>/dev/null || true
         restorecon -R "$ICTCORE_DIR/etc/freeswitch" 2>/dev/null || true
         ok "SELinux fcontext set: $ICTCORE_DIR/etc/freeswitch → httpd_sys_rw_content_t"
-        # The directory/dialplan wrappers under /etc/freeswitch are touched by PHP to
-        # force FS glob re-expansion on reloadxml. Relabel them (etc_t → rw) so the
-        # touch() succeeds; without it new extensions stay invisible until FS restart.
-        for _wrap in /etc/freeswitch/directory/fpbx_webrtc.xml /etc/freeswitch/dialplan/ictcore.xml; do
+        # Files under /etc/freeswitch that php-fpm (httpd_t) writes directly:
+        #  - directory/dialplan wrappers are touch()ed to force FS glob re-expansion;
+        #  - autoload_configs/callcenter.conf.xml is rewritten by CallQueue with the
+        #    current queues so mod_callcenter knows them (else the dialplan routes to a
+        #    queue mod_callcenter never loaded and the call dies).
+        # All default to etc_t, which blocks the write; relabel them rw.
+        for _wrap in /etc/freeswitch/directory/fpbx_webrtc.xml /etc/freeswitch/dialplan/ictcore.xml /etc/freeswitch/autoload_configs/callcenter.conf.xml; do
             [[ -e "$_wrap" ]] || continue
             semanage fcontext -a -t httpd_sys_rw_content_t "$_wrap" 2>/dev/null || \
                 semanage fcontext -m -t httpd_sys_rw_content_t "$_wrap" 2>/dev/null || true
