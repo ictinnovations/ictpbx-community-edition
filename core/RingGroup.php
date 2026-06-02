@@ -255,7 +255,15 @@ class RingGroup
           $bridge_parts = array_map(function($ext) use ($domain_name) {
             return 'user/' . $ext . '@' . $domain_name;
           }, $members);
-          $bridge_string = implode('|', $bridge_parts);
+          // FreeSWITCH bridge separators: ',' rings all endpoints simultaneously,
+          // '|' rings them one at a time (sequential). Pick the separator from the
+          // strategy — previously hardcoded '|', so every group rang sequentially
+          // and only one member ever rang under the "simultaneous" strategy.
+          $sequential = in_array($this->ring_group_strategy, ['sequence', 'rollover', 'random'], true);
+          if ($this->ring_group_strategy === 'random') {
+            shuffle($bridge_parts);
+          }
+          $bridge_string = implode($sequential ? '|' : ',', $bridge_parts);
         }
       } catch (\Throwable $ex) {
         Corelog::log("Ring group destination fetch failed: " . $ex->getMessage(), Corelog::WARNING);

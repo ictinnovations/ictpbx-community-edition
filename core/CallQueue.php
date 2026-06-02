@@ -146,6 +146,14 @@ class CallQueue
       $values[$f] = $val;
     }
 
+    // FusionPBX schema varies across versions (e.g. CE's 5.5.7 v_call_center_queues
+    // lacks queue_enabled, which 6.6.0 has). Write only columns that actually exist
+    // so the same code works on every node — never ALTER the FusionPBX-owned table.
+    $existing_cols = $pdo->query(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'v_call_center_queues'"
+    )->fetchAll(\PDO::FETCH_COLUMN);
+    $values = array_intersect_key($values, array_flip($existing_cols));
+
     try {
       if (empty($this->call_center_queue_uuid)) {
         $this->call_center_queue_uuid = self::generate_uuid();

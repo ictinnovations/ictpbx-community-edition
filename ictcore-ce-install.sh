@@ -468,38 +468,27 @@ if [[ ! -f "$WSS_PEM" ]]; then
 else
     ok "WSS TLS certificate already present at $WSS_PEM"
 fi
-# Enable plain WebSocket (ws-binding :5066) in the internal profile so JsSIP softphone
-# can connect. Apache proxies ws://HOST/ws/ → 127.0.0.1:5066 internally; port 5066
-# is NOT opened in the firewall — all WebSocket traffic goes through port 80/443.
-FS_INTERNAL=/etc/freeswitch/sip_profiles/internal.xml
-if [[ -f "$FS_INTERNAL" ]]; then
-    # Enable plain WebSocket binding for JsSIP softphone (proxied via Apache /ws/)
-    sed -i 's|value=":5066" enabled="false"|value=":5066" enabled="true"|g' "$FS_INTERNAL"
-    ok "WebSocket binding :5066 enabled in $FS_INTERNAL (proxied via Apache, not exposed externally)"
+# Disable stock FusionPBX SIP profiles (internal/external + ipv6 variants). They
+# collide with the dedicated webrtc profile on sip-port 5080 and ws-binding :5066,
+# which prevents webrtc from starting (FS logs "Error Creating SIP UA for profile:
+# webrtc ... ATTEMPT N"). FreeSWITCH only loads *.xml from sip_profiles/, so renaming
+# to .noload disables them. The webrtc profile (context=ictcore) serves all softphone
+# registration; trunks/gateways register through the ictcore profile.
+for _prof in internal external internal-ipv6 external-ipv6; do
+    _pf="/etc/freeswitch/sip_profiles/${_prof}.xml"
+    [[ -f "$_pf" ]] && mv -f "$_pf" "${_pf}.noload" && ok "disabled stock SIP profile ${_prof}.xml"
+done
 
-    # Route WebRTC/JsSIP calls through the ictcore dialplan context
-    if grep -q 'context.*default' "$FS_INTERNAL"; then
-        sed -i 's|<param name="context" value="default"/>|<param name="context" value="ictcore"/>|' "$FS_INTERNAL"
-        ok "internal.xml: context set to ictcore"
-    fi
-
-    # force-register-domain: ensures sofia_contact() lookups match the registration
-    # domain used by JsSIP clients; without this all sofia_contact() calls return empty
-    if grep -q 'force-register-domain' "$FS_INTERNAL"; then
-        sed -i 's|<param name="force-register-domain" value="[^"]*"/>|<param name="force-register-domain" value="$${local_ip_v4}"/>|' "$FS_INTERNAL"
-    else
-        sed -i 's|</settings>|  <param name="force-register-domain" value="$${local_ip_v4}"/>\n</settings>|' "$FS_INTERNAL"
-    fi
-    ok "internal.xml: force-register-domain set to \$\${local_ip_v4}"
-
-    # Disable session timers: JsSIP omits Session-Expires; FS rejects INVITEs with 422
-    if ! grep -q 'enable-timer' "$FS_INTERNAL"; then
-        sed -i 's|</settings>|  <param name="enable-timer" value="false"/>\n</settings>|' "$FS_INTERNAL"
-        ok "internal.xml: enable-timer disabled (JsSIP/WebRTC compatibility)"
-    else
-        ok "internal.xml: enable-timer already set"
-    fi
-fi
+# Disable the stock FreeSWITCH directory (default.xml + default/*.xml demo users).
+# Its domain is named $${domain}, which on a bare-IP install resolves to the same
+# value as $${local_ip_v4} — the domain used by our fpbx_webrtc.xml wrapper. Two
+# directory files declaring the SAME domain name collide: FS loads the stock one
+# (alphabetically first) and includes default/*.xml (extensions 1000-1019), which
+# SHADOWS our fpbx_extensions/*.xml include — so ICTCore-created extensions resolve
+# "Can't find user [NNNN@<ip>]" and softphones can't register. Renaming to .noload
+# (FS only loads *.xml) leaves fpbx_webrtc.xml as the sole owner of the IP domain.
+_stock_dir="/etc/freeswitch/directory/default.xml"
+[[ -f "$_stock_dir" ]] && mv -f "$_stock_dir" "${_stock_dir}.noload" && ok "disabled stock directory default.xml"
 
 # WebRTC SIP profile — dedicated profile for JsSIP softphone (port 5080, ws :5066).
 # Uses $${local_ip_v4} so force-register-domain resolves to the server's IP at FS startup.
@@ -558,7 +547,10 @@ done
 # mod_voicemail does a domain-scoped user lookup; voicemail users must live inside the
 # same <domain> element as extensions (a separate domain in another file is NOT merged).
 FS_WEBRTC_USERS=/etc/freeswitch/directory/fpbx_webrtc.xml
-if [[ ! -f "$FS_WEBRTC_USERS" ]]; then
+# -s (not -f): a stale empty placeholder must be (re)written, not skipped. The
+# self-bootstrap in FpbxExtension::sync_fs_directory only writes this wrapper when
+# the file is absent, so an empty file here leaves extensions undeclared forever.
+if [[ ! -s "$FS_WEBRTC_USERS" ]]; then
     cat > "$FS_WEBRTC_USERS" << WEBRTCUSERS
 <include>
   <domain name="${PUBLIC_HOST}">
@@ -578,6 +570,10 @@ if [[ ! -f "$FS_WEBRTC_USERS" ]]; then
 WEBRTCUSERS
     ok "fpbx_webrtc.xml domain directory created (domain=${PUBLIC_HOST})"
 fi
+# Owned by ictcore so php-fpm (running as ictcore) can touch it on extension save,
+# forcing FS to re-expand the fpbx_extensions/*.xml glob on reloadxml.
+chown ictcore:ictcore "$FS_WEBRTC_USERS" 2>/dev/null || true
+chmod 664 "$FS_WEBRTC_USERS" 2>/dev/null || true
 
 # Reload FreeSWITCH XML so the internal profile picks up the certificate and starts.
 fs_cli -p "$ESL_PASS" -x 'reloadxml' >/dev/null 2>&1 || true
@@ -1159,6 +1155,24 @@ if command -v getenforce &>/dev/null && [[ "$(getenforce)" != "Disabled" ]]; the
             semanage fcontext -m -t httpd_sys_rw_content_t "$ICTCORE_DIR/data(/.*)?" 2>/dev/null || true
         restorecon -R "$ICTCORE_DIR/data" 2>/dev/null || true
         ok "SELinux fcontext set: $ICTCORE_DIR/data → httpd_sys_rw_content_t"
+        # etc/freeswitch/ — FpbxExtension/RingGroup/Voicemail etc. write per-record
+        # dialplan + directory XML here (and touch the wrappers) on every save/delete.
+        # Default usr_t blocks file_put_contents from httpd_t → extensions never get a
+        # directory entry → "Can't find user" on REGISTER. Must be httpd_sys_rw_content_t.
+        semanage fcontext -a -t httpd_sys_rw_content_t "$ICTCORE_DIR/etc/freeswitch(/.*)?" 2>/dev/null || \
+            semanage fcontext -m -t httpd_sys_rw_content_t "$ICTCORE_DIR/etc/freeswitch(/.*)?" 2>/dev/null || true
+        restorecon -R "$ICTCORE_DIR/etc/freeswitch" 2>/dev/null || true
+        ok "SELinux fcontext set: $ICTCORE_DIR/etc/freeswitch → httpd_sys_rw_content_t"
+        # The directory/dialplan wrappers under /etc/freeswitch are touched by PHP to
+        # force FS glob re-expansion on reloadxml. Relabel them (etc_t → rw) so the
+        # touch() succeeds; without it new extensions stay invisible until FS restart.
+        for _wrap in /etc/freeswitch/directory/fpbx_webrtc.xml /etc/freeswitch/dialplan/ictcore.xml; do
+            [[ -e "$_wrap" ]] || continue
+            semanage fcontext -a -t httpd_sys_rw_content_t "$_wrap" 2>/dev/null || \
+                semanage fcontext -m -t httpd_sys_rw_content_t "$_wrap" 2>/dev/null || true
+            restorecon "$_wrap" 2>/dev/null || true
+        done
+        ok "SELinux fcontext set: FS reloadxml wrappers → httpd_sys_rw_content_t"
     fi
 fi
 
@@ -1222,7 +1236,7 @@ if [[ -f /usr/ictpbxx/dist/index.html ]]; then
     Alias /api /usr/ictcore/wwwroot
     <Directory /usr/ictcore/wwwroot>
         # #6 — /etc/ictcore.conf in open_basedir so Conf\File reads the symlink.
-        SetEnv PHP_ADMIN_VALUE "open_basedir = /usr/ictcore/:/etc/ictcore.conf:/usr/bin:/bin:/tmp/"
+        SetEnv PHP_ADMIN_VALUE "open_basedir = /usr/ictcore/:/etc/ictcore.conf:/etc/freeswitch/:/usr/bin:/bin:/tmp/"
         Options Indexes FollowSymLinks Includes
         AllowOverride All
         Require all granted
@@ -1263,7 +1277,7 @@ else
     Alias /api /usr/ictcore/wwwroot
     <Directory /usr/ictcore/wwwroot>
         # #6 — /etc/ictcore.conf in open_basedir so Conf\File reads the symlink.
-        SetEnv PHP_ADMIN_VALUE "open_basedir = /usr/ictcore/:/etc/ictcore.conf:/usr/bin:/bin:/tmp/"
+        SetEnv PHP_ADMIN_VALUE "open_basedir = /usr/ictcore/:/etc/ictcore.conf:/etc/freeswitch/:/usr/bin:/bin:/tmp/"
         Options Indexes FollowSymLinks Includes
         AllowOverride All
         Require all granted
@@ -1291,6 +1305,11 @@ if [[ ! -f /etc/httpd/modules/mod_rewrite.so ]]; then
     info "mod_rewrite.so missing — pulling httpd sub-packages..."
     dnf install -y httpd-tools mod_http2 2>>"$LOG" || true
 fi
+
+# The webrtc profile binds ws-binding :5066 to its sip-ip ($${local_ip_v4}), NOT to
+# loopback — so the /ws/ proxy must target the server's real IPv4, not 127.0.0.1, or
+# Apache gets "(13)Permission denied / failed to connect to backend".
+sed -i "s|ws://127.0.0.1:5066|ws://${SERVER_IP}:5066|g" "$APACHE_CONF"
 grep -q 'mod_rewrite' /etc/httpd/conf.modules.d/*.conf 2>/dev/null || \
     echo "LoadModule rewrite_module modules/mod_rewrite.so" \
         >> /etc/httpd/conf.modules.d/00-base.conf
@@ -1331,6 +1350,9 @@ ok "freeswitch user added to ictcore group (ictcore.conf read access for Lua)"
 # SELinux: allow Apache to write (log, cache)
 setsebool -P httpd_unified 1 &>/dev/null || true
 setsebool -P httpd_can_network_connect_db 1 &>/dev/null || true
+# Required for the /ws/ → FreeSWITCH WebSocket proxy: without it SELinux (Enforcing
+# on stock Rocky) denies httpd outbound TCP to port 5066 → softphone WS fails with 503.
+setsebool -P httpd_can_network_connect 1 &>/dev/null || true
 
 systemctl restart php-fpm
 systemctl restart httpd
@@ -1398,7 +1420,7 @@ if [[ -n "$PUBLIC_DOMAIN" ]]; then
 
     Alias /api /usr/ictcore/wwwroot
     <Directory /usr/ictcore/wwwroot>
-        SetEnv PHP_ADMIN_VALUE "open_basedir = /usr/ictcore/:/etc/ictcore.conf:/usr/bin:/bin:/tmp/"
+        SetEnv PHP_ADMIN_VALUE "open_basedir = /usr/ictcore/:/etc/ictcore.conf:/etc/freeswitch/:/usr/bin:/bin:/tmp/"
         Options Indexes FollowSymLinks Includes
         AllowOverride All
         Require all granted
@@ -1415,9 +1437,9 @@ if [[ -n "$PUBLIC_DOMAIN" ]]; then
     RewriteEngine On
     RewriteCond %{HTTP:Upgrade} websocket [NC]
     RewriteCond %{HTTP:Connection} upgrade [NC]
-    RewriteRule ^/ws(/.*)?$ wss://127.0.0.1:5067/\$1 [P,L]
-    ProxyPass /ws/ wss://127.0.0.1:5067/
-    ProxyPassReverse /ws/ wss://127.0.0.1:5067/
+    RewriteRule ^/ws(/.*)?$ wss://${SERVER_IP}:5067/\$1 [P,L]
+    ProxyPass /ws/ wss://${SERVER_IP}:5067/
+    ProxyPassReverse /ws/ wss://${SERVER_IP}:5067/
 
     # Phone auto-provisioning — HTTPS only (phones must use TLS for credential security)
     Alias /provision /var/www/fusionpbx/app/provision
@@ -1437,7 +1459,7 @@ if [[ -n "$PUBLIC_DOMAIN" ]]; then
 </VirtualHost>
 SSLVHOST
             systemctl restart httpd
-            ok "HTTPS vhost written: /etc/httpd/conf.d/ictpbx-ssl.conf (wss://127.0.0.1:5067)"
+            ok "HTTPS vhost written: /etc/httpd/conf.d/ictpbx-ssl.conf (wss://${SERVER_IP}:5067)"
         fi
     fi
 fi
@@ -1456,10 +1478,20 @@ if systemctl is-active --quiet firewalld; then
             ok "firewalld: $SVC added"
         fi
     done
+    # External SIP softphones (Zoiper / Linphone) register to the webrtc profile's
+    # SIP listener on 5080 (UDP+TCP) and carry audio over the FreeSWITCH RTP range
+    # (16384–32768/udp). These must be open in BOTH modes (with or without
+    # domain+SSL) — the native-SIP path is the always-on softphone option, and is
+    # the ONLY working softphone when the node has no domain+TLS (browser WebRTC
+    # needs a secure context).
+    for PORT in 5080/udp 5080/tcp 16384-32768/udp; do
+        quiet firewall-cmd --permanent --zone=public --add-port="$PORT"
+        ok "firewalld: port $PORT added (SIP/RTP for external softphones)"
+    done
     quiet firewall-cmd --reload
     ok "firewalld reloaded"
 else
-    warn "firewalld not running — ensure ports 80, 443, 5060, 7443 are open in your cloud panel"
+    warn "firewalld not running — ensure ports 80, 443, 5080/udp+tcp (SIP) and 16384-32768/udp (RTP) are open in your cloud panel"
 fi
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1593,6 +1625,32 @@ echo "    - Multi-tenant management (tenant CRUD hidden)"
 echo "    - Branding API endpoints (return 404)"
 echo "    - User cap enforcement (daily/monthly limits bypassed)"
 echo "    - Billing modules"
+echo ""
+echo "  ──────────────────────────────────────────────────────────"
+echo "  [*] SOFTPHONES / WEBPHONE"
+echo "  ──────────────────────────────────────────────────────────"
+if [[ -n "$PUBLIC_DOMAIN" ]]; then
+    echo "    Browser WebRTC webphone : ENABLED"
+    echo "      The built-in dialer works at https://${PUBLIC_DOMAIN} once an"
+    echo "      extension is registered (Apache proxies /ws/ → FreeSWITCH WSS 5067)."
+else
+    echo "    Browser WebRTC webphone : DISABLED (no domain + TLS)"
+    echo "      The built-in browser dialer needs a SECURE context — browsers block"
+    echo "      microphone access and plain ws:// on non-HTTPS pages. It will NOT"
+    echo "      carry audio on a bare-IP / HTTP install."
+    echo "      To enable it later: point a domain at this server, then re-run this"
+    echo "      installer with  DOMAIN=<your.domain> TLS_EMAIL=<you@example.com>"
+    echo "      (issues Let's Encrypt TLS + switches the proxy to WSS 5067)."
+fi
+echo ""
+echo "    External SIP softphone (Zoiper / Linphone) : ALWAYS AVAILABLE"
+echo "      Works with or without domain+TLS — the recommended path on HTTP nodes."
+echo "        Server / Domain : ${SERVER_IP}"
+echo "        SIP Port        : 5080   (transport UDP)"
+echo "        Username        : the extension number (e.g. 1001)"
+echo "        Password        : that extension's SIP password (set in the UI)"
+echo "        RTP/audio ports : 16384-32768/udp (opened in firewalld above)"
+echo "      Ensure 5080/udp+tcp and 16384-32768/udp are open in your cloud panel too."
 echo ""
 echo "  ──────────────────────────────────────────────────────────"
 echo "  [!] SECURITY — change these defaults before going to production:"
