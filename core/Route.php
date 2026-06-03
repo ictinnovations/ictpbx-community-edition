@@ -25,6 +25,9 @@ class Route
       'fpbx_dialplan_uuid'
   );
 
+  /** Directory of static outbound-route dialplan files, included by the ictcore context. */
+  private static $fs_dialplan_dir = '/usr/ictcore/etc/freeswitch/dialplan/provider';
+
   private static $read_only = array(
       'route_id'
   );
@@ -142,7 +145,14 @@ class Route
   public function delete()
   {
     Corelog::log("Route delete", Corelog::CRUD);
-    // Remove the FusionPBX projection first so an orphaned dialplan row never lingers.
+    // Remove the static FreeSWITCH dialplan file first so a dialed prefix never
+    // keeps routing out after the route is gone.
+    try {
+      $this->remove_fs_dialplan();
+    } catch (\Throwable $e) {
+      Corelog::log("Route remove_fs_dialplan failed: " . $e->getMessage(), Corelog::ERROR);
+    }
+    // Remove the (legacy) FusionPBX projection too so an orphaned dialplan row never lingers.
     try {
       $this->unpublish_from_fusionpbx();
     } catch (\Throwable $e) {
@@ -201,7 +211,19 @@ class Route
       Corelog::log("New route created: $this->route_id", Corelog::CRUD);
     }
 
-    // Publish to FusionPBX v_dialplans (best-effort). Failures must not block MariaDB save.
+    // Static-XML outbound dialplan. FusionPBX's Lua xml_handler is disabled, so the
+    // v_dialplans projection below is never loaded by FreeSWITCH; every PBX module
+    // instead emits static XML that the ictcore dialplan context includes. This is
+    // the live outbound path for registered extensions dialing out.
+    try {
+      $this->sync_fs_dialplan();
+    } catch (\Throwable $e) {
+      Corelog::log("Route sync_fs_dialplan failed: " . $e->getMessage(), Corelog::ERROR);
+    }
+
+    // Publish to FusionPBX v_dialplans (legacy projection; kept best-effort so a
+    // future re-enable of the xml_handler still sees the row). Failures must not
+    // block MariaDB save.
     try {
       $this->publish_to_fusionpbx();
     } catch (\Throwable $e) {
@@ -209,6 +231,131 @@ class Route
     }
 
     return $result;
+  }
+
+  /**
+   * Write this voice route as a static FreeSWITCH outbound dialplan file.
+   *
+   * Mirrors the other PBX modules (RingGroup/IvrMenu/...): a file under the
+   * provider dialplan dir that the ictcore context includes, applied via
+   * touch + reloadxml. Bridges by gateway NAME (sofia/gateway/<provider_name>/...)
+   * because the static sip_profiles/provider gateways are declared by name, not
+   * by the FusionPBX fpbx_gateway_uuid the v_dialplans projection used.
+   */
+  private function sync_fs_dialplan()
+  {
+    // Only voice routes drive registered-extension outbound dialing. Fax/SMS/email
+    // routes are consumed by ICTCore's service-specific spool logic, never by
+    // extension dial-out — and must not leave a stale voice dialplan behind.
+    if ((((int) $this->service_flag) & 1) === 0) {
+      $this->remove_fs_dialplan();
+      Corelog::log("Route sync skipped: non-voice service_flag={$this->service_flag}", Corelog::WARNING);
+      return;
+    }
+
+    if (empty($this->destination_id) || empty($this->provider_id)) {
+      Corelog::log("Route sync skipped: missing destination_id or provider_id", Corelog::WARNING);
+      return;
+    }
+
+    // Resolve destination prefix.
+    $dest_q = DB::query(self::$tbl_destination,
+      "SELECT prefix, name FROM " . self::$tbl_destination . " WHERE destination_id='%destination_id%'",
+      array('destination_id' => $this->destination_id));
+    $dest = mysqli_fetch_assoc($dest_q);
+    if (empty($dest) || empty($dest['prefix'])) {
+      Corelog::log("Route sync skipped: destination prefix unresolved for destination_id={$this->destination_id}", Corelog::WARNING);
+      return;
+    }
+    $prefix = $dest['prefix'];
+
+    // Resolve provider gateway NAME (= FreeSWITCH gateway name in sip_profiles/provider)
+    // and the trunk's authorized outbound caller-ID DID.
+    $prov_q = DB::query(self::$tbl_provider,
+      "SELECT name, outbound_caller_id FROM " . self::$tbl_provider . " WHERE provider_id='%provider_id%'",
+      array('provider_id' => $this->provider_id));
+    $prov = mysqli_fetch_assoc($prov_q);
+    if (empty($prov) || empty($prov['name'])) {
+      Corelog::log("Route sync skipped: provider_id={$this->provider_id} name unresolved", Corelog::WARNING);
+      return;
+    }
+    $gateway_name = $prov['name'];
+
+    // Carriers (e.g. Commio/SignalWire) reject outbound calls whose caller-ID is not
+    // a DID owned on that trunk's account (403 Forbidden). Pin the trunk's authorized
+    // DID on the outbound leg so the egress CLI is always one the carrier accepts,
+    // regardless of the dialing extension's effective_caller_id_number. Digits/+ only.
+    $cid = isset($prov['outbound_caller_id'])
+      ? preg_replace('/[^0-9+]/', '', (string) $prov['outbound_caller_id'])
+      : '';
+
+    $e = function($s) { return htmlspecialchars((string)$s, ENT_XML1, 'UTF-8'); };
+    $label = $e($this->name ?: ($dest['name'] ?: $gateway_name));
+    $regex = $e('^' . preg_quote($prefix, '/') . '([0-9]+)$');
+    $gw    = $e($gateway_name);
+    $pfx   = $e($prefix);
+
+    $cid_actions = '';
+    if ($cid !== '') {
+      $cid_e = $e($cid);
+      $cid_actions  = "      <action application=\"set\" data=\"effective_caller_id_number={$cid_e}\"/>\n";
+      $cid_actions .= "      <action application=\"set\" data=\"effective_caller_id_name={$cid_e}\"/>\n";
+    }
+
+    $xml  = '<?xml version="1.0" encoding="utf-8"?>' . "\n";
+    $xml .= '<include>' . "\n";
+    $xml .= "  <extension name=\"{$label}\" continue=\"false\">\n";
+    $xml .= "    <condition field=\"destination_number\" expression=\"{$regex}\">\n";
+    $xml .= "      <action application=\"export\" data=\"call_direction=outbound\" inline=\"true\"/>\n";
+    $xml .= $cid_actions;
+    $xml .= "      <action application=\"unset\" data=\"call_timeout\"/>\n";
+    $xml .= "      <action application=\"bridge\" data=\"sofia/gateway/{$gw}/{$pfx}\$1\"/>\n";
+    $xml .= "      <action application=\"hangup\"/>\n";
+    $xml .= "    </condition>\n";
+    $xml .= "  </extension>\n";
+    $xml .= '</include>' . "\n";
+
+    $dir = self::$fs_dialplan_dir;
+    if (!is_dir($dir)) {
+      @mkdir($dir, 0755, true);
+    }
+    $file = $this->fs_dialplan_file();
+    if (file_put_contents($file, $xml) === false) {
+      throw new CoreException(500, "Route dialplan write failed: $file");
+    }
+    Corelog::log("Route dialplan XML written: $file", Corelog::CRUD);
+
+    $this->reload_fs();
+  }
+
+  private function remove_fs_dialplan()
+  {
+    if (empty($this->route_id)) {
+      return;
+    }
+    $file = $this->fs_dialplan_file();
+    if (is_file($file)) {
+      @unlink($file);
+      Corelog::log("Route dialplan XML removed: $file", Corelog::CRUD);
+      $this->reload_fs();
+    }
+  }
+
+  private function fs_dialplan_file()
+  {
+    return self::$fs_dialplan_dir . '/route_' . $this->route_id . '.xml';
+  }
+
+  private function reload_fs()
+  {
+    @touch('/etc/freeswitch/dialplan/ictcore.xml');
+    try {
+      if (class_exists('\\ICT\\Core\\Realtime')) {
+        \ICT\Core\Realtime::run_cmd('reloadxml');
+      }
+    } catch (\Throwable $e) {
+      Corelog::log("reloadxml failed: " . $e->getMessage(), Corelog::WARNING);
+    }
   }
 
   /**

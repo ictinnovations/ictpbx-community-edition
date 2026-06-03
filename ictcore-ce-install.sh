@@ -442,6 +442,30 @@ if [[ -f "$FS_SWITCH" ]]; then
     ok "FreeSWITCH sessions-per-second set to 100 in $FS_SWITCH"
 fi
 
+# Music-on-hold audio: the freeswitch-sounds-music-* RPMs are NOT in the configured
+# FreeSWITCH repo, so call queues / MOH would play silence. Seed the official tarballs
+# into the FusionPBX layout local_stream.conf.xml expects: music/default/<rate>/.
+FS_MUSIC_BASE=/usr/share/freeswitch/sounds/music
+if [[ ! -d "$FS_MUSIC_BASE/default/8000" ]] || [[ -z "$(ls -A "$FS_MUSIC_BASE/default/8000" 2>/dev/null)" ]]; then
+    _moh_tmp=$(mktemp -d)
+    for _rate in 8000 16000 32000 48000; do
+        _tgz="freeswitch-sounds-music-${_rate}-1.0.52.tar.gz"
+        if curl -fsSL "https://files.freeswitch.org/releases/sounds/${_tgz}" -o "$_moh_tmp/$_tgz" 2>/dev/null; then
+            tar -xzf "$_moh_tmp/$_tgz" -C "$_moh_tmp" 2>/dev/null || true
+            mkdir -p "$FS_MUSIC_BASE/default/${_rate}"
+            # tarball extracts to music/<rate>/*.wav — relocate into music/default/<rate>/
+            cp -f "$_moh_tmp/music/${_rate}/"*.wav "$FS_MUSIC_BASE/default/${_rate}/" 2>/dev/null || true
+        fi
+    done
+    rm -rf "$_moh_tmp"
+    chown -R freeswitch:daemon "$FS_MUSIC_BASE" 2>/dev/null || true
+    if [[ -n "$(ls -A "$FS_MUSIC_BASE/default/8000" 2>/dev/null)" ]]; then
+        ok "Music-on-hold seeded into music/default/{8000,16000,32000,48000}"
+    else
+        warn "MOH download failed — call queues will play silence until music files added to $FS_MUSIC_BASE/default/<rate>/"
+    fi
+fi
+
 systemctl enable --now freeswitch
 if systemctl is-active --quiet freeswitch; then
     ok "FreeSWITCH $(fs_cli -p "$ESL_PASS" -x 'version' 2>/dev/null | head -1 || echo 'installed')"
@@ -515,6 +539,8 @@ if [[ ! -f "$FS_WEBRTC" ]]; then
     <param name="local-network-acl" value="localnet.auto"/>
     <param name="force-register-domain" value="$${local_ip_v4}"/>
     <param name="enable-timer" value="false"/>
+    <param name="dtmf-type" value="rfc2833"/>
+    <param name="liberal-dtmf" value="true"/>
   </settings>
 </profile>
 WEBRTCPROFILE
@@ -524,6 +550,13 @@ else
     sed -i 's|<param name="inbound-codec-prefs" value="[^"]*"/>|<param name="inbound-codec-prefs" value="opus,PCMA,PCMU"/>|' "$FS_WEBRTC"
     sed -i 's|<param name="outbound-codec-prefs" value="[^"]*"/>|<param name="outbound-codec-prefs" value="opus,PCMA,PCMU"/>|' "$FS_WEBRTC"
     ok "webrtc.xml SIP profile updated (codec prefs: opus,PCMA,PCMU)"
+fi
+
+# DTMF: JsSIP sends DTMF as SIP INFO; without liberal-dtmf FS logs "IGNORE INFO DTMF"
+# and drops the digit, so IVR/voicemail keypad menus never advance. Idempotent insert.
+if [[ -f "$FS_WEBRTC" ]] && ! grep -q 'liberal-dtmf' "$FS_WEBRTC"; then
+    sed -i 's|<param name="enable-timer" value="false"/>|<param name="enable-timer" value="false"/>\n    <param name="dtmf-type" value="rfc2833"/>\n    <param name="liberal-dtmf" value="true"/>|' "$FS_WEBRTC"
+    ok "webrtc.xml: dtmf-type=rfc2833 + liberal-dtmf=true (IVR/voicemail keypad)"
 fi
 
 # Disable Lua xml_handler bindings — they fail with "SQLite unable to open database file"
@@ -787,6 +820,12 @@ ok "FreeSWITCH config symlinks created"
 mkdir -p "$ICTCORE_DIR/etc/freeswitch/directory/fpbx_extensions"
 chown ictcore:ictcore "$ICTCORE_DIR/etc/freeswitch/directory/fpbx_extensions"
 
+# Pre-create provider sip_profiles dir as ictcore so the API (php-fpm runs as ictcore)
+# can write gateway XML on trunk save; otherwise gateways silently fail to publish and
+# never register until a manual republish.
+mkdir -p "$ICTCORE_DIR/etc/freeswitch/sip_profiles/provider"
+chown ictcore:ictcore "$ICTCORE_DIR/etc/freeswitch/sip_profiles/provider"
+
 # Pre-create dialplan subdirs for static XML written by PBX modules at runtime
 mkdir -p "$ICTCORE_DIR/etc/freeswitch/dialplan/ring_groups"
 mkdir -p "$ICTCORE_DIR/etc/freeswitch/dialplan/public"
@@ -795,6 +834,8 @@ mkdir -p "$ICTCORE_DIR/etc/freeswitch/dialplan/call_flows"
 mkdir -p "$ICTCORE_DIR/etc/freeswitch/dialplan/call_queues"
 mkdir -p "$ICTCORE_DIR/etc/freeswitch/dialplan/time_conditions"
 mkdir -p "$ICTCORE_DIR/etc/freeswitch/dialplan/voicemails"
+# provider = outbound route dialplan files written by Route::sync_fs_dialplan()
+mkdir -p "$ICTCORE_DIR/etc/freeswitch/dialplan/provider"
 mkdir -p "$ICTCORE_DIR/etc/freeswitch/directory/voicemails"
 mkdir -p /etc/freeswitch/ivr_menus
 chown ictcore:ictcore "$ICTCORE_DIR/etc/freeswitch/dialplan/ring_groups" \
@@ -804,6 +845,7 @@ chown ictcore:ictcore "$ICTCORE_DIR/etc/freeswitch/dialplan/ring_groups" \
                       "$ICTCORE_DIR/etc/freeswitch/dialplan/call_queues" \
                       "$ICTCORE_DIR/etc/freeswitch/dialplan/time_conditions" \
                       "$ICTCORE_DIR/etc/freeswitch/dialplan/voicemails" \
+                      "$ICTCORE_DIR/etc/freeswitch/dialplan/provider" \
                       "$ICTCORE_DIR/etc/freeswitch/directory/voicemails" \
                       /etc/freeswitch/ivr_menus
 

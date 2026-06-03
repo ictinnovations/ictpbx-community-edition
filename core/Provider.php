@@ -59,6 +59,7 @@ class Provider
       'caller_id_in_from',
       'supress_cng',
       'sip_cid_type',
+      'outbound_caller_id',
       'codec_prefs',
       'extension_in_contact',
       'ping',
@@ -136,6 +137,7 @@ class Provider
   public $caller_id_in_from = NULL;
   public $supress_cng = NULL;
   public $sip_cid_type = NULL;
+  public $outbound_caller_id = NULL;
   public $codec_prefs = NULL;
   public $extension_in_contact = NULL;
   public $ping = NULL;

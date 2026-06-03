@@ -24,7 +24,9 @@
         <action application="transfer" data="${sip_to_user} XML ictcore"/>
       </condition>
     </extension>
-    <!-- bridge direct extension-to-extension calls for registered WebRTC/SIP users -->
+    <!-- bridge direct extension-to-extension calls for registered WebRTC/SIP users.
+         MUST run before the outbound routes below so 4-6 digit local extensions are
+         bridged locally and never swallowed by a (possibly empty-prefix) trunk route. -->
     <extension name="local_ext_bridge" continue="false">
       <condition field="destination_number" expression="^(\d{4,6})$">
         <action application="bridge" data="user/$1@${domain_name}"/>
@@ -32,6 +34,15 @@
         <action application="hangup"/>
       </condition>
     </extension>
+    <!-- Outbound routes written by Route::sync_fs_dialplan() (voice extension dial-out).
+         FusionPBX Lua xml_handler is disabled so v_dialplans is not loaded; these
+         static route_<id>.xml files carry outbound routing. Glob is route_*.xml ONLY:
+         the provider_<id>.xml gateway-originate files (rendered from provider.twig,
+         catch-all ^(\d+)$ when the provider prefix is empty) belong to the
+         ictcore_gateway context, NOT here, or they shadow local extension dialing.
+         Placed after local_ext_bridge and before application_inbound so external
+         numbers bridge to the trunk instead of the disconnected Lua brain. -->
+    <X-PRE-PROCESS cmd="include" data="/usr/ictcore/etc/freeswitch/dialplan/provider/route_*.xml"/>
     <extension name="application_inbound">
       <condition field="destination_number" expression="^\+?(\d+)$">
         <action application="lua" data="/usr/ictcore/bin/freeswitch/application.lua 0 inbound success" />
@@ -48,6 +59,15 @@
   </context>
   <!-- public context: receives inbound calls from registered gateways -->
   <context name="public">
+    <!-- Registered trunks (e.g. SignalWire) deliver the call to our registration
+         contact, so the Request-URI user is the trunk username (gw+Name / authuser)
+         and destination_number is non-numeric. The dialed DID is in the To header.
+         Rewrite destination_number from sip_to_user so the DID routes below match. -->
+    <extension name="inbound_gw_to_did" continue="false">
+      <condition field="destination_number" expression="^[^0-9+]" break="on-false">
+        <action application="transfer" data="${sip_to_user} XML public"/>
+      </condition>
+    </extension>
     <X-PRE-PROCESS cmd="include" data="/usr/ictcore/etc/freeswitch/dialplan/public/*.xml"/>
     <!-- Fallback: transfer unmatched DIDs into ictcore for ICTCore Lua processing -->
     <extension name="public_fallback" continue="false">
