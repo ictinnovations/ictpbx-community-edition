@@ -576,6 +576,27 @@ for CONF in conference local_stream; do
     [[ -f "$SRC" && ! -f "$DST" ]] && cp "$SRC" "$DST" && ok "${CONF}.conf.xml created"
 done
 
+# mod_cdr_csv → ictcore template. cdr_etl.php parses this exact 16-field layout into
+# ictfax.cdr_lega. Field 15 is ${call_direction} (the dialplan-exported business
+# direction: outbound on outbound-route legs, inbound on public DID legs) — NOT the
+# native SIP ${direction}, which is always "inbound" for the A-leg and mislabels CDRs.
+CDR_CSV_CONF=/etc/freeswitch/autoload_configs/cdr_csv.conf.xml
+cat > "$CDR_CSV_CONF" <<'CDRCSV'
+<configuration name="cdr_csv.conf" description="CDR CSV Format">
+  <settings>
+    <param name="default-template" value="ictcore"/>
+    <param name="rotate-on-hup" value="true"/>
+    <param name="legs" value="a"/>
+  </settings>
+  <templates>
+    <!-- ICTCore unified CDR template — parsed by /usr/ictcore/scripts/cdr_etl.php
+         into ictfax.cdr_lega (caller_number, destination, direction, call_type, ...) -->
+    <template name="ictcore">"${caller_id_name}","${caller_id_number}","${destination_number}","${context}","${start_stamp}","${answer_stamp}","${end_stamp}","${duration}","${billsec}","${hangup_cause}","${uuid}","${bleg_uuid}","${accountcode}","${last_app}","${call_direction}","${sip_network_ip}"</template>
+  </templates>
+</configuration>
+CDRCSV
+ok "cdr_csv.conf.xml: ictcore template installed (call_direction, legs=a)"
+
 # FreeSWITCH user directory — two-group domain declaration required by mod_voicemail.
 # mod_voicemail does a domain-scoped user lookup; voicemail users must live inside the
 # same <domain> element as extensions (a separate domain in another file is NOT merged).

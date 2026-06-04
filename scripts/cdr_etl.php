@@ -7,7 +7,11 @@
  *   1 caller_id_name      2 caller_id_number   3 destination_number   4 context
  *   5 start_stamp         6 answer_stamp       7 end_stamp            8 duration
  *   9 billsec            10 hangup_cause      11 uuid                12 bleg_uuid
- *  13 accountcode        14 last_app          15 direction           16 sip_network_ip
+ *  13 accountcode        14 last_app          15 call_direction      16 sip_network_ip
+ *
+ * Field 15 is the dialplan-exported ${call_direction} (outbound on outbound-route
+ * legs, inbound on public DID legs). When empty/invalid (e.g. ext-to-ext bridge),
+ * classify_direction() derives it from the caller/destination number pattern.
  *
  * Backward-compat: rows with fewer fields (legacy 15-field "example" template) parse OK;
  * the missing tail columns end up NULL.
@@ -64,6 +68,28 @@ function classify_type(string $last_app, string $destination, string $context): 
   return 'voice';
 }
 
+/**
+ * Fallback call-direction classifier for rows where the dialplan-exported
+ * ${call_direction} is empty/invalid (e.g. local ext-to-ext bridges, which
+ * don't export it). Local extension = 4-6 bare digits; anything else (E.164,
+ * 7+ digits, leading +) is external.
+ *   local  -> external = outbound
+ *   external -> local  = inbound
+ *   local  -> local    = internal
+ * Returns null when both ends are external/unknown (leave as logged).
+ */
+function classify_direction(string $caller, string $destination): ?string {
+  $is_local = function (string $n): bool {
+    return preg_match('/^\d{4,6}$/', trim($n)) === 1;
+  };
+  $caller_local = $is_local($caller);
+  $dest_local   = $is_local($destination);
+  if ($caller_local && !$dest_local) return 'outbound';
+  if (!$caller_local && $dest_local) return 'inbound';
+  if ($caller_local && $dest_local)  return 'internal';
+  return null;
+}
+
 function ts_or_null(?string $v): ?string {
   if ($v === null) return null;
   $v = trim($v);
@@ -79,8 +105,10 @@ function utf8s(?string $v): string {
 function parse_row(string $line): ?array {
   $f = str_getcsv($line, ',', '"');
   if (count($f) < 11) return null;
-  $direction = strtolower($f[14] ?? '');
-  if ($direction === '') $direction = null;
+  $direction = strtolower(trim($f[14] ?? ''));
+  if (!in_array($direction, ['inbound', 'outbound', 'internal'], true)) {
+    $direction = classify_direction($f[1] ?? '', $f[2] ?? '');
+  }
   return [
     'caller_id_name'   => utf8s($f[0]  ?? ''),
     'caller_number'    => utf8s($f[1]  ?? ''),
