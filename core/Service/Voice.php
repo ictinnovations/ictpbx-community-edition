@@ -210,10 +210,9 @@ class Voice extends Service
     if ($oProvider->active) {
       $oToken = new Token();
       $oToken->add('provider', $oProvider);
-      $this->config_save($oProvider->type, $oToken, 'provider_' . $oProvider->provider_id);
+      // gateway XML is owned by Provider::sync_fs_xml() (sip_profiles/provider/<Name>.xml); only write the originate dialplan here
       $this->config_save('provider', $oToken, 'provider_' . $oProvider->provider_id);
     } else {
-      $this->config_delete($oProvider->type, 'provider_' . $oProvider->provider_id);
       $this->config_delete('provider', 'provider_' . $oProvider->provider_id);
     }
     Voice::config_status(Voice::STATUS_NEED_RELOAD);
