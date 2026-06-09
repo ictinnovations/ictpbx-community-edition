@@ -291,7 +291,7 @@ class Route
 
     $e = function($s) { return htmlspecialchars((string)$s, ENT_XML1, 'UTF-8'); };
     $label = $e($this->name ?: ($dest['name'] ?: $gateway_name));
-    $regex = $e('^' . preg_quote($prefix, '/') . '([0-9]+)$');
+    $regex = $e('^\+?' . preg_quote($prefix, '/') . '([0-9]+)$');
     $gw    = $e($gateway_name);
     $pfx   = $e($prefix);
 

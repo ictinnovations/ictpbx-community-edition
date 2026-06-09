@@ -16,7 +16,7 @@ class DeviceLine
   public $auth_id                  = null;
   public $password                 = null;
   public $display_name             = null;
-  public $sip_port                 = '5060';
+  public $sip_port                 = '5080';
   public $sip_transport            = 'udp';
   public $register_expires         = '3600';
   public $enabled                  = true;

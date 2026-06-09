@@ -515,6 +515,10 @@ class RestServer {
 		$mime = $this->mimeDefault;
 		if (!empty($_SERVER["CONTENT_TYPE"])) {
 			$mime = strtolower(trim($_SERVER["CONTENT_TYPE"]));
+			// strip parameters like "; charset=utf-8" so the format switch matches
+			if (($sc = strpos($mime, ';')) !== false) {
+				$mime = trim(substr($mime, 0, $sc));
+			}
 		}
 		return $mime;
 	}

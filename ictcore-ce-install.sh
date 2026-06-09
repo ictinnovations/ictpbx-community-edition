@@ -769,6 +769,22 @@ SELECT gen_random_uuid(), 'provision', 'enabled', 'boolean', 'true', true
  );
 SQL2
 
+# #29b — Disable the provisioning domain filter so devices resolve by MAC regardless
+# of the Host header. Defaults to TRUE when unset, which 403s any device whose FusionPBX
+# domain name does not equal the web host the phone provisions against.
+PGPASSWORD="$PG_FUSIONPBX_PASS" psql -h 127.0.0.1 -U fusionpbx -d fusionpbx <<SQL2B >>"$LOG" 2>&1 \
+    && ok "Provisioning domain filter disabled (or already present)" \
+    || warn "Provisioning domain-filter seed failed (non-fatal)"
+INSERT INTO v_default_settings
+  (default_setting_uuid, default_setting_category, default_setting_subcategory,
+   default_setting_name, default_setting_value, default_setting_enabled)
+SELECT gen_random_uuid(), 'provision', 'http_domain_filter', 'boolean', 'false', true
+ WHERE NOT EXISTS (
+   SELECT 1 FROM v_default_settings
+   WHERE default_setting_category='provision' AND default_setting_subcategory='http_domain_filter'
+ );
+SQL2B
+
 # Capture the first active domain_uuid so we can link tenant_id=1 to it
 # after the MariaDB tenant table exists (audit gap #5).
 FPBX_DOMAIN_UUID=$(PGPASSWORD="$PG_FUSIONPBX_PASS" psql -h 127.0.0.1 -U fusionpbx -d fusionpbx \
@@ -895,6 +911,23 @@ if [[ -f "$ICTCORE_DIR/composer.json" ]]; then
     cd "$ICTCORE_DIR"
     quiet /usr/local/bin/composer install --no-dev --no-interaction
     ok "Composer dependencies installed"
+fi
+
+# Re-apply the jacwright/restserver charset patch (composer install overwrites
+# vendor/). getMime() must strip a "; charset=utf-8" suffix from Content-Type or
+# the JSON body is never decoded and POST/PUT payloads silently arrive empty.
+# Idempotent — guarded by the inserted code's own marker.
+RS_FILE="$ICTCORE_DIR/vendor/jacwright/restserver/source/Jacwright/RestServer/RestServer.php"
+if [[ -f "$RS_FILE" ]]; then
+    php -r '
+        $f=$argv[1]; $s=file_get_contents($f);
+        if (strpos($s,"strpos(\$mime") === false) {
+            $n="\$mime = strtolower(trim(\$_SERVER[\"CONTENT_TYPE\"]));";
+            $r=$n."\n\t\t\tif ((\$sc = strpos(\$mime, \";\")) !== false) { \$mime = trim(substr(\$mime, 0, \$sc)); }";
+            if (strpos($s,$n) !== false) file_put_contents($f, str_replace($n,$r,$s));
+        }
+    ' "$RS_FILE" && ok "RestServer charset-tolerance patch applied" \
+        || warn "RestServer charset patch skipped (non-fatal)"
 fi
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
