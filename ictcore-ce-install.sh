@@ -19,6 +19,8 @@ FUSIONPBX_DIR=/var/www/fusionpbx
 APACHE_CONF=/etc/httpd/conf.d/ictpbx.conf
 LOG=/tmp/ictcore-ce-install.log
 ICTCORE_REPO=https://github.com/ictinnovations/ictpbx-community-edition.git
+# Release tag to install. Inherited from install-ce.sh; override for a pin/rollback.
+RELEASE_TAG="${RELEASE_TAG:-v1.0.2}"
 FUSIONPBX_REPO=https://github.com/fusionpbx/fusionpbx.git
 FUSIONPBX_TAG=5.5.7
 
@@ -815,23 +817,25 @@ if [[ -d "$ICTCORE_DIR/.git" ]]; then
         CLEAN_URL=$(git -C "$ICTCORE_DIR" remote get-url origin)
         AUTH_URL="${CLEAN_URL/https:\/\//https:\/\/${GIT_TOKEN}@}"
         git -C "$ICTCORE_DIR" remote set-url origin "$AUTH_URL"
-        quiet git -C "$ICTCORE_DIR" pull origin main
+        quiet git -C "$ICTCORE_DIR" fetch --tags --force origin
+        quiet git -C "$ICTCORE_DIR" checkout --force "$RELEASE_TAG"
         git -C "$ICTCORE_DIR" remote set-url origin "$CLEAN_URL"
     else
-        quiet git -C "$ICTCORE_DIR" pull origin main
+        quiet git -C "$ICTCORE_DIR" fetch --tags --force origin
+        quiet git -C "$ICTCORE_DIR" checkout --force "$RELEASE_TAG"
     fi
-    ok "ICTCore updated"
+    ok "ICTCore updated to $RELEASE_TAG"
 else
-    info "Cloning ICTCore..."
+    info "Cloning ICTCore ($RELEASE_TAG)..."
     # Honor GIT_TOKEN for private CE mirror (during the staging window before
     # the repo is made public). Token is scrubbed from .git/config after clone.
     if [[ -n "${GIT_TOKEN:-}" ]]; then
         AUTH_URL="${ICTCORE_REPO/https:\/\//https:\/\/${GIT_TOKEN}@}"
-        quiet git clone "$AUTH_URL" "$ICTCORE_DIR"
+        quiet git clone --branch "$RELEASE_TAG" "$AUTH_URL" "$ICTCORE_DIR"
         git -C "$ICTCORE_DIR" remote set-url origin "$ICTCORE_REPO"
         ok "ICTCore cloned (PAT scrubbed from .git/config)"
     else
-        if ! git clone "$ICTCORE_REPO" "$ICTCORE_DIR" >>"$LOG" 2>&1; then
+        if ! git clone --branch "$RELEASE_TAG" "$ICTCORE_REPO" "$ICTCORE_DIR" >>"$LOG" 2>&1; then
             echo ""
             warn "git clone failed — if the CE mirror is still private, re-run with:"
             warn "    GIT_TOKEN=ghp_xxxx bash $0"
