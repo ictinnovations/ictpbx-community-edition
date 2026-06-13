@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<context name="user_extension">
+  <!-- one or more accounts tags -->
+  <extension name="444455555">
+    <condition field="destination_number" expression="^ddd|444455555$">
+      <action application="bridge" data="user/ddd@"/>
+    </condition>
+  </extension>
+  <extension name="external_extension">
+    <condition field="destination_number" expression="^(\+|011|00|01|0)(\d+)$">
+      <action application="transfer" data="$2 XML ictcore_gateway"/>
+    </condition>
+  </extension>
+  <extension name="catch_invalid">
+    <condition field="destination_number" expression=".*">
+      <action application="playback" data="sounds/invalid_extension.wav"/>
+      <action application="hangup"/>
+    </condition>
+  </extension>
+</context>

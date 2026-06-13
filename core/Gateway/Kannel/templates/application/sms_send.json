@@ -1,0 +1,11 @@
+{
+  "smsc": "{{ provider.name }}",
+  "to": "{{ provider.prefix }}{{ application.destination }}",
+  "from": "{{ application.source }}",
+  "data": "{{ application.message|escape('json') }}",
+  "mclass": "{{ application.class }}",
+  "coding": "{{ application.encoding }}",
+  "charset": "{{ application.charset }}",
+  "spool_id": "{{ transmission.spool.spool_id }}",
+  "application_id": "{{ application.application_id }}"
+}
