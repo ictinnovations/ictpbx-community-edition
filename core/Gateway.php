@@ -62,6 +62,8 @@ class Gateway
         return new Gateway\Kannel();
       case Gateway\Sendmail::GATEWAY_FLAG:
         return new Gateway\Sendmail();
+      case Gateway\Signalwire::GATEWAY_FLAG:
+        return new Gateway\Signalwire();
       case Gateway\Freeswitch::GATEWAY_FLAG:
       default:
         return new Gateway\Freeswitch();

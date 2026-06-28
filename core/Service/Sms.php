@@ -11,6 +11,7 @@ namespace ICT\Core\Service;
 
 use ICT\Core\Application;
 use ICT\Core\Gateway\Kannel;
+use ICT\Core\Gateway\Signalwire;
 use ICT\Core\Message\Text;
 use ICT\Core\Provider;
 use ICT\Core\Service;
@@ -51,7 +52,7 @@ class Sms extends Service
   {
     static $oGateway = NULL;
     if (empty($oGateway)) {
-      $oGateway = new Kannel();
+      $oGateway = new Signalwire();
     }
     return $oGateway;
   }

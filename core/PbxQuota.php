@@ -23,6 +23,7 @@ class PbxQuota
   const EXTENSIONS    = 15;
   const DEVICES       = 16;
   const IVR_MENU      = 17;
+  const SMS_MESSAGES  = 18;
 
   private static $labels = [
     self::RING_GROUP    => 'Ring Groups',
@@ -36,6 +37,7 @@ class PbxQuota
     self::EXTENSIONS    => 'Extensions',
     self::DEVICES       => 'Devices',
     self::IVR_MENU      => 'IVR Menus',
+    self::SMS_MESSAGES  => 'SMS Messages/mo',
   ];
 
   /**
@@ -92,7 +94,7 @@ class PbxQuota
        FROM quota q
        JOIN resource r ON r.resource_id = q.resource_id
        WHERE q.tenant_id = $tid
-         AND q.resource_id IN (" . self::RING_GROUP . "," . self::CALL_QUEUE . "," . self::VOICEMAIL . "," . self::CONFERENCE . "," . self::MUSIC_ON_HOLD . ",12,13,14," . self::EXTENSIONS . "," . self::DEVICES . "," . self::IVR_MENU . ")"
+         AND q.resource_id IN (" . self::RING_GROUP . "," . self::CALL_QUEUE . "," . self::VOICEMAIL . "," . self::CONFERENCE . "," . self::MUSIC_ON_HOLD . ",12,13,14," . self::EXTENSIONS . "," . self::DEVICES . "," . self::IVR_MENU . "," . self::SMS_MESSAGES . ")"
     );
     $rows = [];
     while ($row = mysqli_fetch_assoc($result)) {
@@ -150,6 +152,7 @@ class PbxQuota
       12                  => 1000, // voice_minutes
       13                  => 500,  // fax_pages
       14                  => 100,  // conference_minutes
+      self::SMS_MESSAGES  => 500,  // sms_messages/mo
     ];
 
     foreach ($defaults as $rid => $limit) {

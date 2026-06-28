@@ -4,6 +4,8 @@
 <include>
   <!-- inbound calls / DID -->
   <context name="ictcore">
+    <!-- Feature codes (e.g. *99 AI Gateway). Additive; evaluated before numeric routes. -->
+    <X-PRE-PROCESS cmd="include" data="/usr/ictcore/etc/freeswitch/dialplan/feature_codes/*.xml"/>
     <!-- Ring group static XML files (one per ring group) -->
     <X-PRE-PROCESS cmd="include" data="/usr/ictcore/etc/freeswitch/dialplan/ring_groups/*.xml"/>
     <!-- IVR menus written by IvrMenu::sync_fs_dialplan() -->
