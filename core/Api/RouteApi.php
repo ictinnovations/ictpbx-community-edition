@@ -60,6 +60,25 @@ class RouteApi extends Api
   }
 
   /**
+   * Update an existing Route
+   *
+   * @url PUT /routes/$route_id
+   */
+  public function update($route_id, $data = array())
+  {
+    $this->_authorize('route_create');
+
+    $oRoute = new Route($route_id);
+    $this->set($oRoute, $data);
+
+    if ($oRoute->save()) {
+      return $oRoute->route_id;
+    } else {
+      throw new CoreException(417, 'Route update failed');
+    }
+  }
+
+  /**
    * List all available Routes
    *
    * @url GET /routes
