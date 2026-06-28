@@ -1,0 +1,11 @@
+<include>
+  <!-- ICTPBX AI Gateway *99 feature code. Additive: only *99 routes here; everything else
+       (ext-to-ext bridge, inbound routes) is untouched. Deploy to
+       /etc/freeswitch/dialplan/ictcore/ictpbx_ai_99.xml then touch ictcore.xml + reloadxml. -->
+  <extension name="ictpbx_ai_gateway_99" continue="false">
+    <condition field="destination_number" expression="^\*99$">
+      <action application="lua" data="/usr/ictcore/bin/freeswitch/ictpbx_ai_gateway.lua"/>
+      <action application="hangup"/>
+    </condition>
+  </extension>
+</include>
