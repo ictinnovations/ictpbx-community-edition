@@ -52,7 +52,9 @@ class Sms extends Service
   {
     static $oGateway = NULL;
     if (empty($oGateway)) {
-      $oGateway = new Signalwire();
+      // Signalwire is EE-only and stripped from CE; fall back to the legacy Kannel
+      // gateway there so this never references an absent class.
+      $oGateway = class_exists('ICT\\Core\\Gateway\\Signalwire') ? new Signalwire() : new Kannel();
     }
     return $oGateway;
   }

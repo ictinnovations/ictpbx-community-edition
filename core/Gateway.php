@@ -62,8 +62,15 @@ class Gateway
         return new Gateway\Kannel();
       case Gateway\Sendmail::GATEWAY_FLAG:
         return new Gateway\Sendmail();
-      case Gateway\Signalwire::GATEWAY_FLAG:
-        return new Gateway\Signalwire();
+      // SignalWire SMS gateway (flag 16) is EE-only and physically stripped from CE.
+      // The literal case label (not Signalwire::GATEWAY_FLAG) prevents PHP from
+      // autoloading the absent class while evaluating this switch on CE; class_exists
+      // guards instantiation so voice/fax gateway loads never fatal there.
+      case 16:
+        if (class_exists('ICT\\Core\\Gateway\\Signalwire')) {
+          return new Gateway\Signalwire();
+        }
+        return new Gateway\Freeswitch();
       case Gateway\Freeswitch::GATEWAY_FLAG:
       default:
         return new Gateway\Freeswitch();
