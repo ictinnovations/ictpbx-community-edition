@@ -20,7 +20,7 @@ APACHE_CONF=/etc/httpd/conf.d/ictpbx.conf
 LOG=/tmp/ictcore-ce-install.log
 ICTCORE_REPO=https://github.com/ictinnovations/ictpbx-community-edition.git
 # Release tag to install. Inherited from install-ce.sh; override for a pin/rollback.
-RELEASE_TAG="${RELEASE_TAG:-v1.0.2}"
+RELEASE_TAG="${RELEASE_TAG:-v1.2.0}"
 FUSIONPBX_REPO=https://github.com/fusionpbx/fusionpbx.git
 FUSIONPBX_TAG=5.5.7
 
