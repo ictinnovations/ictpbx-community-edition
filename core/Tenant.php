@@ -126,24 +126,27 @@ class Tenant {
     $aTenant = array();
     $from_str = ''; //self::$table;
     $aWhere = array();
+    $esc = function ($v) { return mysqli_real_escape_string(DB::$link, $v); };
     foreach ($aFilter as $search_field => $search_value) {
       switch ($search_field) {
          case 'tenant_id':
+          $aWhere[] = "t.tenant_id = " . (int)$search_value;
+          break;
          case 'first_name':
          case 'last_name':
          case 'company':
          case 'phone':
          case 'email':
-          $aWhere[] = "t.$search_field = '$search_value'";
+          $aWhere[] = "t.$search_field = '" . $esc($search_value) . "'";
           break;
         case 'created_by':
-          $aWhere[] = "t.created_by = '$search_value'";
+          $aWhere[] = "t.created_by = '" . $esc($search_value) . "'";
           break;
         case 'before':
-          $aWhere[] = "t.date_created <= $search_value";
+          $aWhere[] = "t.date_created <= " . (int)$search_value;
           break;
         case 'after':
-          $aWhere[] = "t.date_created >= $search_value";
+          $aWhere[] = "t.date_created >= " . (int)$search_value;
           break;
       }
     }

@@ -72,19 +72,20 @@ class Destination
     $aDestination = array();
     $from_str = self::$table;
     $aWhere = array();
+    $esc = function ($v) { return mysqli_real_escape_string(DB::$link, $v); };
     foreach ($aFilter as $search_field => $search_value) {
       switch ($search_field) {
         case 'destination_id':
         case 'carrier_id':
         case 'timezone_id':
         case 'country_id':
-          $aWhere[] = "$search_field = $search_value";
+          $aWhere[] = "$search_field = " . (int)$search_value;
           break;
         case 'phone':
           $aPattern = array();
           $len = strlen($search_value);
           for ($i=1; $i <= ($len-1); $i++) {
-            $aPattern[] = substr($search_value, 0, -$i);
+            $aPattern[] = $esc(substr($search_value, 0, -$i));
           }
           $pattern_string = "'".implode("','", $aPattern)."'";
           if (!empty($pattern_string)) {

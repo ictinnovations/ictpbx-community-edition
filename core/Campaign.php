@@ -95,29 +95,30 @@ class Campaign
     $aCampaign = array();
     $from_str = self::$table . " c LEFT JOIN program p ON c.program_id=p.program_id";
     $aWhere = array();
+    $esc = function ($v) { return mysqli_real_escape_string(DB::$link, $v); };
     foreach ($aFilter as $search_field => $search_value) {
       switch ($search_field) {
         case 'campaign_id':
         case 'group_id':
         case 'tenant_id':
-          $aWhere[] = "c.$search_field = $search_value";
+          $aWhere[] = "c.$search_field = " . (int)$search_value;
           break;
         case 'program_id':
-          $aWhere[] = "c.$search_field LIKE '%$search_value'";
+          $aWhere[] = "c.$search_field LIKE '%" . $esc($search_value) . "'";
           break;
         case 'status':
-          $aWhere[] = "c.$search_field LIKE '%$search_value%'";
+          $aWhere[] = "c.$search_field LIKE '%" . $esc($search_value) . "%'";
           break;
 
         case 'user_id':
         case 'created_by':
-          $aWhere[] = "c.created_by = '$search_value'";
+          $aWhere[] = "c.created_by = '" . $esc($search_value) . "'";
           break;
         case 'before':
-          $aWhere[] = "c.date_created <= $search_value";
+          $aWhere[] = "c.date_created <= " . (int)$search_value;
           break;
         case 'after':
-          $aWhere[] = "c.date_created >= $search_value";
+          $aWhere[] = "c.date_created >= " . (int)$search_value;
           break;
       }
     }

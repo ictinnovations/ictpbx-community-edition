@@ -190,15 +190,16 @@ class Account
     $limitSql = '';
     $pageIndex = isset($aFilter['pageIndex']) ? (int)$aFilter['pageIndex'] : 0;
     $pageSize = isset($aFilter['pageSize']) ? (int)$aFilter['pageSize'] : 0;
+    $esc = function ($v) { return mysqli_real_escape_string(DB::$link, $v); };
     foreach ($aFilter as $search_field => $search_value) {
       switch ($search_field) {
         case 'account_id':
         case 'tenant_id':
           case 'linkdid_id':
-          $aWhere[] = "a.$search_field = $search_value";
+          $aWhere[] = "a.$search_field = " . (int)$search_value;
           break;
         case 'type':
-          $aWhere[] = "a.$search_field = '$search_value'";
+          $aWhere[] = "a.$search_field = '" . $esc($search_value) . "'";
           break;
         case 'username':
         case 'phone':
@@ -207,18 +208,18 @@ class Account
         case 'passwd_pin':
         case 'first_name':
         case 'last_name':
-          $aWhere[] = "a.$search_field LIKE '%$search_value%'";
+          $aWhere[] = "a.$search_field LIKE '%" . $esc($search_value) . "%'";
           break;
 
         case 'user_id':
         case 'created_by':
-          $aWhere[] = "a.created_by = '$search_value'";
+          $aWhere[] = "a.created_by = '" . $esc($search_value) . "'";
           break;
         case 'before':
-          $aWhere[] = "a.date_created <= $search_value";
+          $aWhere[] = "a.date_created <= " . (int)$search_value;
           break;
         case 'after':
-          $aWhere[] = "a.date_created >= $search_value";
+          $aWhere[] = "a.date_created >= " . (int)$search_value;
           break;
         case 'totalrows':
           $totalrows = 1;

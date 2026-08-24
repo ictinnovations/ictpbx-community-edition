@@ -171,19 +171,20 @@ class Spool
     $aSpool = array();
     $from_str = self::$table;
     $aWhere = array();
+    $esc = function ($v) { return mysqli_real_escape_string(DB::$link, $v); };
     foreach ($aFilter as $search_field => $search_value) {
       switch ($search_field) {
         case 'spool_id':
         case 'account_id':
         case 'transmission_id':
-          $aWhere[] = "$search_field = $search_value";
+          $aWhere[] = "$search_field = " . (int)$search_value;
           break;
         case 'service_flag':
-          $aWhere[] = "($search_field & $search_value) = $search_value";
+          $aWhere[] = "($search_field & " . (int)$search_value . ") = " . (int)$search_value;
           break;
         case 'status':
         case 'response':
-          $aWhere[] = "$search_field = '$search_value'";
+          $aWhere[] = "$search_field = '" . $esc($search_value) . "'";
           break;
       }
     }
@@ -383,43 +384,44 @@ class Spool
     $totalrows = null;
     $from_str = '';
     $aWhere = array();
+    $esc = function ($v) { return mysqli_real_escape_string(DB::$link, $v); };
     $aFilter += array('status' => Spool::STATUS_COMPLETED); // default filter
     foreach ($aFilter as $search_field => $search_value) {
       switch ($search_field) {
         case 'tenant_id':
-          $aWhere[] = "t.tenant_id = $search_value";
+          $aWhere[] = "t.tenant_id = " . (int)$search_value;
           break;
         case 'user_id':
         case 'created_by':
-          $aWhere[] = "t.created_by = $search_value";
+          $aWhere[] = "t.created_by = " . (int)$search_value;
           break;
         case 'origin':
-          $aWhere[] = "t.origin = '$search_value'";
+          $aWhere[] = "t.origin = '" . $esc($search_value) . "'";
           break;
         case 'status':
-          $aWhere[] = "s.status = '$search_value'";
+          $aWhere[] = "s.status = '" . $esc($search_value) . "'";
           break;
         case 'campaign_id':
-          $aWhere[] = "t.campaign_id = $search_value";
+          $aWhere[] = "t.campaign_id = " . (int)$search_value;
           break;
         case 'direction':
-          $aWhere[] = "t.direction = '$search_value'";
+          $aWhere[] = "t.direction = '" . $esc($search_value) . "'";
           break;
         case 'monthly':
           $start_time = time() - 86400 * 30;
           $aWhere[] = "s.time_connect > '$start_time'";
           break;
         case 'from':
-          $aWhere[] = "s.time_connect > $search_value";
+          $aWhere[] = "s.time_connect > " . (int)$search_value;
           break;
         case 'to':
-          $aWhere[] = "s.time_connect < ($search_value + 86400)";
+          $aWhere[] = "s.time_connect < (" . (int)$search_value . " + 86400)";
           break;
         case 'totalrows':
           $totalrows = 1;
           break;
         case 'service_flag':
-          $aWhere[] = "t.service_flag = '$search_value'";
+          $aWhere[] = "t.service_flag = " . (int)$search_value;
           break;
         case ($pageIndex > 0 && $pageSize > 0):
           $offset = ($pageIndex - 1) * $pageSize;
@@ -476,20 +478,21 @@ class Spool
     foreach ($aFilter as $search_field => $search_value) {
       switch ($search_field) {
         case 'tenant_id':
-          $aWhere[] = "t.tenant_id = $search_value";
+          $aWhere[] = "t.tenant_id = " . (int)$search_value;
           break;
         case 'user_id':
         case 'created_by':
-          $aWhere[] = "t.created_by = $search_value";
+          $aWhere[] = "t.created_by = " . (int)$search_value;
           break;
         case 'account_id':
-          $aWhere[] = "t.account_id In ($search_value)";
+          $aAccountIds = array_map('intval', explode(',', $search_value));
+          $aWhere[] = "t.account_id In (" . implode(',', $aAccountIds) . ")";
           break;
         case 'totalrows':
           $totalrows = 1;
           break;
         case 'origin':
-          $aWhere[] = "t.origin = '$search_value'";
+          $aWhere[] = "t.origin = '" . addslashes($search_value) . "'";
           break;
         case 'status':
           if (is_array($search_value)) {
@@ -502,23 +505,23 @@ class Spool
           }
           break;
         case 'campaign_id':
-          $aWhere[] = "t.campaign_id = $search_value";
+          $aWhere[] = "t.campaign_id = " . (int)$search_value;
           break;
         case 'direction':
-          $aWhere[] = "t.direction = '$search_value'";
+          $aWhere[] = "t.direction = '" . addslashes($search_value) . "'";
           break;
         case 'monthly':
           $start_time = time() - 86400 * 30;
           $aWhere[] = "s.time_start > '$start_time'";
           break;
         case 'from':
-          $aWhere[] = "t.date_created > $search_value";
+          $aWhere[] = "t.date_created > " . (int)$search_value;
           break;
         case 'to':
-          $aWhere[] = "t.date_created < $search_value";
+          $aWhere[] = "t.date_created < " . (int)$search_value;
           break;
         case 'service_flag':
-          $aWhere[] = "t.service_flag = '$search_value'";
+          $aWhere[] = "t.service_flag = " . (int)$search_value;
           break;
         case ($pageIndex > 0 && $pageSize > 0):
           $offset = ($pageIndex - 1) * $pageSize;

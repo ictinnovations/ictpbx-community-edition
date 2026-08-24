@@ -263,6 +263,7 @@ class Transmission
     $from_str_in .= ' LEFT JOIN ' . self::$table_document . ' d ON sr.data = d.document_id ';
 
     $aWhere = array();
+    $esc = function ($v) { return mysqli_real_escape_string(DB::$link, $v); };
     $aWhere[] .= "t.is_deleted = 0";
     foreach ($aFilter as $search_field => $search_value) {
       switch ($search_field) {
@@ -272,48 +273,48 @@ class Transmission
         case 'account_id':
         case 'contact_id':
         case 'campaign_id':
-          $aWhere[] = "t.$search_field = $search_value";
+          $aWhere[] = "t.$search_field = " . (int)$search_value;
           break;
         case 'service_flag':
-          $aWhere[] = "(t.$search_field & $search_value) = $search_value";
+          $aWhere[] = "(t.$search_field & " . (int)$search_value . ") = " . (int)$search_value;
           break;
         case 'username':
-          $aWhere[] = "u.$search_field = '$search_value'";
+          $aWhere[] = "u.$search_field = '" . $esc($search_value) . "'";
          break;
         case 'title':
         case 'origin':
         case 'direction':
         case 'status':
         case 'response':
-          $aWhere[] = "t.$search_field LIKE '%$search_value%'";
+          $aWhere[] = "t.$search_field LIKE '%" . $esc($search_value) . "%'";
           break;
 
         case 'user_id':
         case 'created_by':
-          $aWhere[] = "t.created_by = '$search_value'";
+          $aWhere[] = "t.created_by = '" . $esc($search_value) . "'";
           break;
         case 'before':
-          $aWhere[] = "t.date_created < $search_value";
+          $aWhere[] = "t.date_created < " . (int)$search_value;
           break;
         case 'after':
-          $aWhere[] = "t.date_created > $search_value";
+          $aWhere[] = "t.date_created > " . (int)$search_value;
           break;
         case 'is_deleted':
-          $aWhere[] = "t.$search_field = '$search_value'";
+          $aWhere[] = "t.$search_field = '" . (int)$search_value . "'";
           break;
         case 'totalrows':
           $totalrows = 1;
           break;
         case 'email':
         case 'phone':
-          $aWhere[] = "(a.$search_field LIKE '%$search_value%' OR c.$search_field LIKE '%$search_value%')";
+          $aWhere[] = "(a.$search_field LIKE '%" . $esc($search_value) . "%' OR c.$search_field LIKE '%" . $esc($search_value) . "%')";
           break;
         case 'account_email':
         case 'account_phone':
         case 'contact_email':
         case 'contact_phone':
           $fixed_field = str_replace(array('account_', 'contact_'), array('a.', 'c.'), $search_field);
-          $aWhere[] = "$fixed_field LIKE '%$search_value%'";
+          $aWhere[] = "$fixed_field LIKE '%" . $esc($search_value) . "%'";
           break;
         case ($pageIndex > 0 && $pageSize > 0):
           $offset = ($pageIndex - 1) * $pageSize;

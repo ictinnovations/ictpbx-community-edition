@@ -88,24 +88,24 @@ class Country
     $aCountry = array();
     $from_str = self::$table;
     $aWhere = array();
+    $esc = function ($v) { return mysqli_real_escape_string(DB::$link, $v); };
     foreach ($aFilter as $search_field => $search_value) {
       switch ($search_field) {
         case 'country_id':
         case 'timezone_id':
-          $aWhere[] = "$search_field = $search_value";
+          $aWhere[] = "$search_field = " . (int)$search_value;
           break;
         case 'region_id':
-          // $aWhere[] = "$search_field = '$search_value'";
-          $aWhere[] = "$search_field LIKE '%$search_value%'";
+          $aWhere[] = "$search_field LIKE '%" . $esc($search_value) . "%'";
           break;
         case 'created_by':
-          $aWhere[] = "created_by = $search_value";
+          $aWhere[] = "created_by = " . (int)$search_value;
           break;
         case 'before':
-          $aWhere[] = "date_created <= $search_value";
+          $aWhere[] = "date_created <= " . (int)$search_value;
           break;
         case 'after':
-          $aWhere[] = "date_created >= $search_value";
+          $aWhere[] = "date_created >= " . (int)$search_value;
           break;
       }
     }

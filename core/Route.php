@@ -66,20 +66,21 @@ class Route
     $aRoute = array();
     $from_str = null;
     $aWhere = array();
+    $esc = function ($v) { return mysqli_real_escape_string(DB::$link, $v); };
     foreach ($aFilter as $search_field => $search_value) {
       switch ($search_field) {
         case 'route_id':
         case 'provider_id':
-          $aWhere[] = "route.$search_field = $search_value";
+          $aWhere[] = "route.$search_field = " . (int)$search_value;
           break;
         case 'name':
-          $aWhere[] = "route.$search_field LIKE '%$search_value%'";
+          $aWhere[] = "route.$search_field LIKE '%" . $esc($search_value) . "%'";
           break;
         case 'destination_id':
-          $aWhere[] = "route.$search_field = '$search_value'";
+          $aWhere[] = "route.$search_field = '" . $esc($search_value) . "'";
           break;
         case 'service_flag':
-          $aWhere[] = "route.service_flag = $search_value";
+          $aWhere[] = "route.service_flag = " . (int)$search_value;
           break;
       }
     }

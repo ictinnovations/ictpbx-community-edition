@@ -32,6 +32,7 @@ class User
   const AUTH_TYPE_BEARER = 'bearer';
   const AUTH_TYPE_NETWORK = 'network';
   const AUTH_TYPE_SAML = 'saml';
+  const AUTH_TYPE_APIKEY = 'apikey';
 
   private static $table = 'usr';
   private static $link_role = 'user_role';
@@ -297,32 +298,33 @@ class User
     $pageSize = isset($aFilter['pageSize']) ? (int)$aFilter['pageSize'] : 0;
 
     $aWhere = array();
+    $esc = function ($v) { return mysqli_real_escape_string(DB::$link, $v); };
     foreach ($aFilter as $search_field => $search_value) {
       switch ($search_field) {
         case 'user_id':
-          $aWhere[] = "u.usr_id = $search_value";
+          $aWhere[] = "u.usr_id = " . (int)$search_value;
           break;
         case 'tenant_id':
-          $aWhere[] = "u.tenant_id = $search_value";
+          $aWhere[] = "u.tenant_id = " . (int)$search_value;
           break;
         case 'username':
         case 'phone':
         case 'email':
         case 'first_name':
         case 'last_name':
-          $aWhere[] = "u.$search_field = '$search_value'";
+          $aWhere[] = "u.$search_field = '" . $esc($search_value) . "'";
           break;
         case 'created_by':
-          $aWhere[] = "u.created_by = '$search_value'";
+          $aWhere[] = "u.created_by = '" . $esc($search_value) . "'";
           break;
         case 'totalrows':
           $totalrows = 1;
           break;
         case 'before':
-          $aWhere[] = "u.date_created <= $search_value";
+          $aWhere[] = "u.date_created <= " . (int)$search_value;
           break;
         case 'after':
-          $aWhere[] = "u.date_created >= $search_value";
+          $aWhere[] = "u.date_created >= " . (int)$search_value;
           break;
         case ($pageIndex > 0 && $pageSize > 0):
           $offset = ($pageIndex - 1) * $pageSize;
@@ -379,24 +381,25 @@ class User
 
     $from_str = '';
     $aWhere = array();
+    $esc = function ($v) { return mysqli_real_escape_string(DB::$link, $v); };
     foreach ($aFilter as $search_field => $search_value) {
       switch ($search_field) {
         case 'user_id':
-          $aWhere[] = "u.usr_id = $search_value";
+          $aWhere[] = "u.usr_id = " . (int)$search_value;
           break;
         case 'tenant_id':
-          $aWhere[] = "u.tenant_id = $search_value";
+          $aWhere[] = "u.tenant_id = " . (int)$search_value;
           break;
         case 'username':
         case 'phone':
         case 'email':
         case 'first_name':
         case 'last_name':
-          $aWhere[] = "u.$search_field = '$search_value'";
+          $aWhere[] = "u.$search_field = '" . $esc($search_value) . "'";
           break;
 
         case 'created_by':
-          $aWhere[] = "u.created_by = '$search_value'";
+          $aWhere[] = "u.created_by = '" . $esc($search_value) . "'";
           break;
         case 'pagesize':
           $pagesize = $search_value;
@@ -409,10 +412,10 @@ class User
           break;
           break;
         case 'before':
-          $aWhere[] = "u.date_created <= $search_value";
+          $aWhere[] = "u.date_created <= " . (int)$search_value;
           break;
         case 'after':
-          $aWhere[] = "u.date_created >= $search_value";
+          $aWhere[] = "u.date_created >= " . (int)$search_value;
           break;
       }
     }
@@ -946,6 +949,14 @@ class User
   {
     $oUser = null;
     switch ($key_type) {
+      case User::AUTH_TYPE_APIKEY:
+        $usr_id = ApiKey::resolve($access_key);
+        if (!empty($usr_id)) {
+          return new self($usr_id);
+        }
+        Corelog::log('API key authentication failed', Corelog::ERROR);
+        return false;
+
       case User::AUTH_TYPE_BEARER:
         try {
           $key_file = Conf::get('security:public_key', '/usr/ictcore/etc/ssh/ib_node.pub');

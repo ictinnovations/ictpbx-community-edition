@@ -78,6 +78,16 @@ class Http extends Data implements AuthServer
   {
     $auth_headers = $this->getAuthHeaders();
 
+    // Programmatic access. Only reached when the header is actually present,
+    // so the Bearer / Basic / POST-body chain below is unaffected.
+    $api_key = $this->getApiKey();
+    if (!empty($api_key)) {
+      if (method_exists($classObj, 'authenticate')) {
+        return $classObj->authenticate($api_key, User::AUTH_TYPE_APIKEY);
+      }
+      return true;
+    }
+
     // Try to use bearer token as default
     $auth_method = User::AUTH_TYPE_BEARER;
     $credentials = $this->getBearer($auth_headers);
@@ -148,6 +158,23 @@ class Http extends Data implements AuthServer
       }
     }
     return null;
+  }
+
+  /**
+   * Get programmatic API key from the X-API-Key request header
+   */
+  protected function getApiKey() {
+    $key = $this->server_get('HTTP_X_API_KEY', null);
+    if (empty($key) && function_exists('apache_request_headers')) {
+      $requestheaders = apache_request_headers();
+      foreach ($requestheaders as $name => $value) {
+        if (strcasecmp($name, 'X-API-Key') === 0) {
+          $key = $value;
+          break;
+        }
+      }
+    }
+    return empty($key) ? null : trim($key);
   }
 
   /**

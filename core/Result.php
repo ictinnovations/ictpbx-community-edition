@@ -71,19 +71,20 @@ class Result
     $aResult = array();
     $from_str = self::$table;
     $aWhere = array();
+    $esc = function ($v) { return mysqli_real_escape_string(DB::$link, $v); };
     foreach ($aFilter as $search_field => $search_value) {
       switch ($search_field) {
         case 'spool_result_id':
         case 'spool_id':
         case 'application_id':
-          $aWhere[] = "$search_field = $search_value";
+          $aWhere[] = "$search_field = " . (int)$search_value;
           break;
         case 'type':
         case 'name':
-          $aWhere[] = "$search_field = '$search_value'";
+          $aWhere[] = "$search_field = '" . $esc($search_value) . "'";
           break;
         case 'data':
-          $aWhere[] = "$search_field LIKE '%$search_value%'";
+          $aWhere[] = "$search_field LIKE '%" . $esc($search_value) . "%'";
           break;
       }
     }

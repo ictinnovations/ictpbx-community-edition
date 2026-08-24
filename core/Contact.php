@@ -133,24 +133,25 @@ class Contact
     $from_str = self::$table . " c LEFT JOIN " . self::$table_link . " l ON c.contact_id=l.contact_id";
     $aWhere = array();
     $aWhere[] = "is_deleted = 0";
+    $esc = function ($v) { return mysqli_real_escape_string(DB::$link, $v); };
     foreach ($aFilter as $search_field => $search_value) {
       switch ($search_field) {
         case 'group_id':
-          $aWhere[] = "l.$search_field = $search_value";
+          $aWhere[] = "l.$search_field = " . (int)$search_value;
           break;
         case 'contact_id':
         case 'tenant_id':
-          $aWhere[] = "c.$search_field = $search_value";
+          $aWhere[] = "c.$search_field = " . (int)$search_value;
           break;
         case 'phone':
-          $aWhere[] = "c.$search_field LIKE '%$search_value'";
+          $aWhere[] = "c.$search_field LIKE '%" . $esc($search_value) . "'";
           break;
         case 'email':
-          $aWhere[] = "c.$search_field = '$search_value'";
+          $aWhere[] = "c.$search_field = '" . $esc($search_value) . "'";
           break;
         case 'first_name':
         case 'last_name':
-          $aWhere[] = "c.$search_field LIKE '%$search_value%'";
+          $aWhere[] = "c.$search_field LIKE '%" . $esc($search_value) . "%'";
           break;
         case 'pagesize':
           $pagesize = $search_value;
@@ -163,13 +164,13 @@ class Contact
           break;
         case 'user_id':
         case 'created_by':
-          $aWhere[] = "c.created_by = '$search_value'";
+          $aWhere[] = "c.created_by = '" . $esc($search_value) . "'";
           break;
         case 'before':
-          $aWhere[] = "c.date_created <= $search_value";
+          $aWhere[] = "c.date_created <= " . (int)$search_value;
           break;
         case 'after':
-          $aWhere[] = "c.date_created >= $search_value";
+          $aWhere[] = "c.date_created >= " . (int)$search_value;
           break;
         case ($pageIndex > 0 && $pageSize > 0):
           $offset = ($pageIndex - 1) * $pageSize;

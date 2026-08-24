@@ -163,19 +163,22 @@ class Provider
     $aProvider = array();
     $from_str = self::$table;
     $aWhere = array();
+    $esc = function ($v) { return mysqli_real_escape_string(DB::$link, $v); };
     foreach ($aFilter as $search_field => $search_value) {
       switch ($search_field) {
         case 'provider_id':
-        case 'name':
         case 'node_id':
         case 'tenant_id':
+        case 'active':
+          $aWhere[] = "$search_field = " . (int)$search_value;
+          break;
+        case 'name':
         case 'host':
         case 'type':
-        case 'active':
-          $aWhere[] = "$search_field = '$search_value'";
+          $aWhere[] = "$search_field = '" . $esc($search_value) . "'";
           break;
         case 'service_flag':
-          $aWhere[] = "($search_field & $search_value) = $search_value";
+          $aWhere[] = "($search_field & " . (int)$search_value . ") = " . (int)$search_value;
           break;
       }
     }
@@ -198,7 +201,7 @@ class Provider
       $from_str = self::$table . ' WHERE active = 1 ';
       $aWhere = array();
       foreach ($provider_ids as $search_value) {
-        $aWhere[] = "provider_id = $search_value";
+        $aWhere[] = "provider_id = " . (int)$search_value;
       }
       if (!empty($aWhere)) {
         $from_str .= ' AND (' . implode(' OR ', $aWhere) . ')'; 

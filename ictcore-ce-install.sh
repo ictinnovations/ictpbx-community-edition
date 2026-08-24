@@ -964,6 +964,7 @@ SCHEMA_FILES=(
     route_fpbx_dialplan_uuid.sql
     cdr_enriched_columns.sql
     extension_config.sql
+    api_key.sql
 )
 
 # Idempotent: skip if base schema already loaded (account table is from database.sql).
