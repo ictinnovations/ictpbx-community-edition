@@ -50,3 +50,6 @@ etc/freeswitch/dialplan/time_conditions/*.xml
 etc/freeswitch/dialplan/voicemails/*.xml
 etc/freeswitch/directory/voicemails/*.xml
 etc/freeswitch/directory/fpbx_extensions/*.xml
+
+# Secret key, never commit
+etc/voice_gateway.key
