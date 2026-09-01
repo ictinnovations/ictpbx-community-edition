@@ -104,7 +104,7 @@ class RingGroupApi extends Api
     $oRingGroup = new RingGroup($ring_group_uuid);
     $this->_assert_pbx_domain($oRingGroup);
     $result = $oRingGroup->delete();
-    if ($result) PbxQuota::decrement($this->oUser->tenant_id, PbxQuota::RING_GROUP);
+    if ($result) PbxQuota::decrement($this->_owner_tenant_id($oRingGroup), PbxQuota::RING_GROUP);
     return $result;
   }
 }

@@ -74,7 +74,7 @@ class MusicOnHoldApi extends Api
     $o = new MusicOnHold($music_on_hold_uuid);
     $this->_assert_pbx_domain($o);
     $result = $o->delete();
-    if ($result) PbxQuota::decrement($this->oUser->tenant_id, PbxQuota::MUSIC_ON_HOLD);
+    if ($result) PbxQuota::decrement($this->_owner_tenant_id($o), PbxQuota::MUSIC_ON_HOLD);
     return $result;
   }
 }

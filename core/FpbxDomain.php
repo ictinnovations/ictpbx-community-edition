@@ -89,6 +89,27 @@ class FpbxDomain
   }
 
   /**
+   * Reverse of get_domain_uuid(): which tenant owns this FusionPBX domain.
+   *
+   * Needed wherever an object's own tenant matters rather than the caller's --
+   * an admin acting on a sub-tenant's record is not acting on their own tenant.
+   *
+   * @param string $domain_uuid
+   * @return int|null null when the domain maps to no tenant
+   */
+  public static function get_tenant_id($domain_uuid)
+  {
+    if (empty($domain_uuid)) {
+      return null;
+    }
+    $res = DB::query('tenant',
+      "SELECT tenant_id FROM tenant WHERE fpbx_domain_uuid = '%uuid%' LIMIT 1",
+      ['uuid' => $domain_uuid]);
+    $row = $res ? mysqli_fetch_assoc($res) : null;
+    return $row ? (int)$row['tenant_id'] : null;
+  }
+
+  /**
    * The domain name FreeSWITCH's directory actually declares.
    *
    * Every extension, whatever its FusionPBX domain, is included into the single

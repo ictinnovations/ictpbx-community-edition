@@ -74,7 +74,7 @@ class ConferenceCenterApi extends Api
     $o = new ConferenceCenter($conference_center_uuid);
     $this->_assert_pbx_domain($o);
     $result = $o->delete();
-    if ($result) PbxQuota::decrement($this->oUser->tenant_id, PbxQuota::CONFERENCE);
+    if ($result) PbxQuota::decrement($this->_owner_tenant_id($o), PbxQuota::CONFERENCE);
     return $result;
   }
 }

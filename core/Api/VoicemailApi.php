@@ -96,7 +96,7 @@ class VoicemailApi extends Api
     $oVoicemail = new Voicemail($voicemail_uuid);
     $this->_assert_pbx_domain($oVoicemail);
     $result = $oVoicemail->delete();
-    if ($result) PbxQuota::decrement($this->oUser->tenant_id, PbxQuota::VOICEMAIL);
+    if ($result) PbxQuota::decrement($this->_owner_tenant_id($oVoicemail), PbxQuota::VOICEMAIL);
     return $result;
   }
 }

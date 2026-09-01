@@ -96,7 +96,7 @@ class CallQueueApi extends Api
     $oQueue = new CallQueue($call_center_queue_uuid);
     $this->_assert_pbx_domain($oQueue);
     $result = $oQueue->delete();
-    if ($result) PbxQuota::decrement($this->oUser->tenant_id, PbxQuota::CALL_QUEUE);
+    if ($result) PbxQuota::decrement($this->_owner_tenant_id($oQueue), PbxQuota::CALL_QUEUE);
     return $result;
   }
 }

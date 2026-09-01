@@ -82,11 +82,18 @@ class Voicemail
 
   public function save()
   {
-    $domain_uuid = FpbxDomain::get_domain_uuid($this->tenant_id);
-    if ($domain_uuid === null) { /* null-domain-guard */
-      throw new \ICT\Core\CoreException(409, 'No FusionPBX domain assigned to this tenant. Contact an administrator.');
+    // Resolve the domain only when the box does not already have one. tenant_id is
+    // not a v_voicemails column, so it is null on every load; re-resolving here would
+    // fall back to "first enabled domain" and silently move a sub-tenant's mailbox
+    // into another tenant's domain on any update.
+    if (empty($this->domain_uuid)) {
+      $domain_uuid = FpbxDomain::get_domain_uuid($this->tenant_id);
+      if ($domain_uuid === null) { /* null-domain-guard */
+        throw new \ICT\Core\CoreException(409, 'No FusionPBX domain assigned to this tenant. Contact an administrator.');
+      }
+      $this->domain_uuid = $domain_uuid;
     }
-    $this->domain_uuid = $domain_uuid;
+    $domain_uuid = $this->domain_uuid;
     $pdo = FpbxDomain::fpbx_db();
 
     $conflict = FpbxDomain::extension_in_use($domain_uuid, $this->voicemail_id, $this->voicemail_uuid);
@@ -176,7 +183,12 @@ class Voicemail
       if (file_exists($dp_file))  @unlink($dp_file);
       if (file_exists($dir_file)) @unlink($dir_file);
     } else {
-      $domain   = FpbxDomain::get_domain_name($this->domain_uuid) ?: 'localhost';
+      // mod_voicemail resolves the mailbox with a domain-scoped directory lookup, and
+      // every voicemail <user> lives inside the single <domain> wrapper the FreeSWITCH
+      // directory declares. Passing the FusionPBX domain name (tenant.local, ...) makes
+      // that lookup fail for every sub-tenant, so use the directory's own domain.
+      $fpbx_domain = FpbxDomain::get_domain_name($this->domain_uuid) ?: 'localhost';
+      $domain      = FpbxDomain::fs_directory_domain($fpbx_domain);
       $vm_id    = htmlspecialchars((string)$this->voicemail_id, ENT_XML1, 'UTF-8');
       $e_dom    = htmlspecialchars($domain, ENT_XML1, 'UTF-8');
       $vm_pass  = htmlspecialchars((string)($this->voicemail_password ?: $this->voicemail_id), ENT_XML1, 'UTF-8');

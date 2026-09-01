@@ -253,7 +253,7 @@ class FpbxExtensionApi extends Api
     $oExt = new FpbxExtension($extension_uuid);
     $this->_assert_pbx_domain($oExt);
     $result = $oExt->delete();
-    if ($result) PbxQuota::decrement($this->oUser->tenant_id, PbxQuota::EXTENSIONS);
+    if ($result) PbxQuota::decrement($this->_owner_tenant_id($oExt), PbxQuota::EXTENSIONS);
     return $result;
   }
 

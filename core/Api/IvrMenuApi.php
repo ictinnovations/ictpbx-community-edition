@@ -84,7 +84,7 @@ class IvrMenuApi extends Api
     $oMenu = new IvrMenu($ivr_menu_uuid);
     $this->_assert_pbx_domain($oMenu);
     $result = $oMenu->delete();
-    if ($result) PbxQuota::decrement($this->oUser->tenant_id, PbxQuota::IVR_MENU);
+    if ($result) PbxQuota::decrement($this->_owner_tenant_id($oMenu), PbxQuota::IVR_MENU);
     return $result;
   }
 }

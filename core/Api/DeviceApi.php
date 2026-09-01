@@ -73,7 +73,7 @@ class DeviceApi extends Api
     $oDevice = new Device($device_uuid);
     $this->_assert_pbx_domain($oDevice);
     $result = $oDevice->delete();
-    if ($result) PbxQuota::decrement($this->oUser->tenant_id, PbxQuota::DEVICES);
+    if ($result) PbxQuota::decrement($this->_owner_tenant_id($oDevice), PbxQuota::DEVICES);
     return $result;
   }
 }

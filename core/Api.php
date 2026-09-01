@@ -111,6 +111,25 @@ class Api
     }
   }
 
+  /**
+   * The tenant that owns a PBX object, which is not always the caller's tenant:
+   * an admin deleting a sub-tenant's record would otherwise debit their own
+   * PBX slot quota and leave the sub-tenant's counter overstated.
+   *
+   * Falls back to the caller's tenant when the object carries no domain, which
+   * keeps single-tenant/CE behaviour unchanged.
+   *
+   * @param object $obj any PBX model with a domain_uuid
+   * @return int|null
+   */
+  protected function _owner_tenant_id($obj)
+  {
+    $tenant_id = (is_object($obj) && !empty($obj->domain_uuid))
+      ? FpbxDomain::get_tenant_id($obj->domain_uuid)
+      : null;
+    return $tenant_id ?: $this->oUser->tenant_id;
+  }
+
   protected function set($oEntity, $data)
   {
     foreach ($data as $key => $value) {
