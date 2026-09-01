@@ -240,6 +240,12 @@ class RingGroup
         }
       }
 
+      // Members are dialled as user/<ext>@<domain>, and that lookup goes through the
+      // FreeSWITCH directory -- which declares one domain for every tenant. Using the
+      // FusionPBX domain name here (tenant.local, acme.local, ...) produces an endpoint
+      // FreeSWITCH cannot resolve, so sub-tenant ring groups never ring.
+      $bridge_domain = FpbxDomain::fs_directory_domain($domain_name);
+
       // Fetch ring group destinations
       $bridge_string = 'error/unallocated';
       try {
@@ -252,8 +258,8 @@ class RingGroup
         $stmt->execute(['uuid' => $this->ring_group_uuid]);
         $members = $stmt->fetchAll(\PDO::FETCH_COLUMN);
         if (!empty($members)) {
-          $bridge_parts = array_map(function($ext) use ($domain_name) {
-            return 'user/' . $ext . '@' . $domain_name;
+          $bridge_parts = array_map(function($ext) use ($bridge_domain) {
+            return 'user/' . $ext . '@' . $bridge_domain;
           }, $members);
           // FreeSWITCH bridge separators: ',' rings all endpoints simultaneously,
           // '|' rings them one at a time (sequential). Pick the separator from the

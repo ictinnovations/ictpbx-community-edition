@@ -14,6 +14,7 @@ class FpbxDomain
   // at install time.
   private static $conf_file = '/usr/ictcore/etc/ictcore.conf';
   private static $fpbx_conf_cache = null;
+  private static $fs_domain_cache = null;
 
   private static function fpbx_conf()
   {
@@ -85,6 +86,53 @@ class FpbxDomain
     $stmt = $pdo->prepare("SELECT domain_name FROM v_domains WHERE domain_uuid = :uuid");
     $stmt->execute(['uuid' => $domain_uuid]);
     return $stmt->fetchColumn() ?: 'default';
+  }
+
+  /**
+   * The domain name FreeSWITCH's directory actually declares.
+   *
+   * Every extension, whatever its FusionPBX domain, is included into the single
+   * <domain name="..."> wrapper in fpbx_webrtc.xml. So `user/<ext>@<fusionpbx domain>`
+   * only resolves for the tenant whose FusionPBX domain happens to match that wrapper
+   * (normally tenant 1); for every sub-tenant it is a dead endpoint. Anything that
+   * builds a `user/...@...` dial string must use this name, not get_domain_name().
+   *
+   * Read from the wrapper itself so it tracks the installer, falling back to
+   * ictcore.conf and finally to whatever the caller already resolved.
+   *
+   * @param string|null $fallback used when the wrapper cannot be read
+   * @return string|null
+   */
+  public static function fs_directory_domain($fallback = null)
+  {
+    if (self::$fs_domain_cache === null) {
+      self::$fs_domain_cache = ''; // '' = looked and found nothing usable
+      $file = '/etc/freeswitch/directory/fpbx_webrtc.xml';
+      if (is_readable($file)) {
+        $xml = @file_get_contents($file);
+        if ($xml !== false && preg_match('/<domain\s+name\s*=\s*"([^"]+)"/i', $xml, $m)) {
+          $name = trim($m[1]);
+          // Skip unexpanded FreeSWITCH variables such as $${local_ip_v4}
+          if ($name !== '' && strpos($name, '$') === false) {
+            self::$fs_domain_cache = $name;
+          }
+        }
+      }
+      if (self::$fs_domain_cache === '' && is_readable(self::$conf_file)) {
+        $ini = @parse_ini_file(self::$conf_file, true);
+        foreach ([['domain', 'name'], ['website', 'host']] as [$section, $key]) {
+          if (!empty($ini[$section][$key])) {
+            $name = trim($ini[$section][$key]);
+            if ($name !== '' && strpos($name, '$') === false) {
+              self::$fs_domain_cache = $name;
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    return self::$fs_domain_cache !== '' ? self::$fs_domain_cache : $fallback;
   }
 
   /**
