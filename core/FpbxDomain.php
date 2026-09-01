@@ -218,17 +218,30 @@ class FpbxDomain
    * Returns the label of the conflicting resource (e.g. 'Ring Group') or null if free.
    * Pass $exclude_uuid to skip the current record on update.
    */
-  public static function extension_in_use($domain_uuid, $extension, $exclude_uuid = null): ?string
+  /**
+   * @param string      $domain_uuid
+   * @param string      $extension
+   * @param string|null $exclude_uuid the record being saved, so it never conflicts with itself
+   * @param string      $scope 'number' for anything dialled as a bare number, 'voicemail'
+   *                    for a mailbox id. Mailboxes live in their own number space: they are
+   *                    reached at *99<id> (see Voicemail::sync_fs_dialplan), so a mailbox may
+   *                    freely share a number with an extension -- that is the normal way to
+   *                    give extension 1001 the mailbox 1001 -- and only collides with another
+   *                    mailbox. Everything else shares the bare-number space.
+   * @return string|null label of the colliding object type, or null when free
+   */
+  public static function extension_in_use($domain_uuid, $extension, $exclude_uuid = null, $scope = 'number'): ?string
   {
     if (empty($domain_uuid) || empty($extension)) return null;
     $pdo = self::fpbx_db();
-    $checks = [
+    $checks = ($scope === 'voicemail') ? [
+      ['v_voicemails',        'voicemail_uuid',          'voicemail_id',                'Voicemail'],
+    ] : [
       ['v_extensions',        'extension_uuid',         'extension',                   'Extension'],
       ['v_ring_groups',       'ring_group_uuid',         'ring_group_extension',        'Ring Group'],
       ['v_call_center_queues','call_center_queue_uuid',  'queue_extension',             'Call Queue'],
       ['v_ivr_menus',         'ivr_menu_uuid',           'ivr_menu_extension',          'IVR Menu'],
       ['v_conference_centers','conference_center_uuid',  'conference_center_extension', 'Conference'],
-      ['v_voicemails',        'voicemail_uuid',          'voicemail_id',                'Voicemail'],
       ['v_call_flows',        'call_flow_uuid',          'call_flow_extension',         'Call Flow'],
     ];
     foreach ($checks as [$table, $pk, $field, $label]) {

@@ -96,9 +96,12 @@ class Voicemail
     $domain_uuid = $this->domain_uuid;
     $pdo = FpbxDomain::fpbx_db();
 
-    $conflict = FpbxDomain::extension_in_use($domain_uuid, $this->voicemail_id, $this->voicemail_uuid);
+    // Mailbox ids have their own number space (reached at *99<id>), so this only
+    // collides with another mailbox -- sharing a number with extension 1001 is the
+    // whole point of mailbox 1001.
+    $conflict = FpbxDomain::extension_in_use($domain_uuid, $this->voicemail_id, $this->voicemail_uuid, 'voicemail');
     if ($conflict !== null) {
-      throw new CoreException(409, "Extension number {$this->voicemail_id} is already in use by a $conflict in this domain.");
+      throw new CoreException(409, "Voicemail box {$this->voicemail_id} already exists in this domain.");
     }
 
     $bool_fields = [
