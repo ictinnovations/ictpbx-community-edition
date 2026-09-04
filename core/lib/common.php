@@ -1,0 +1,266 @@
+<?php
+
+namespace ICT\Core;
+
+/* * ***************************************************************
+ * Copyright © 2026 ICT Innovations Pakistan All Rights Reserved   *
+ * Developed By: Nasir Iqbal                                       *
+ * Website : http://www.ictinnovations.com/                        *
+ * Mail : support@ictinnovations.com                                 *
+ * *************************************************************** */
+
+function list_available_classes($type = null)
+{
+  $aClass = array();
+  $listClass = get_declared_classes();
+
+  if (empty($type)) {
+    return $listClass;
+  } else {
+    foreach ($listClass as $class) {
+      if (is_subclass_of($class, $type)) {
+        $aClass[] = $class;
+      }
+    }
+    return $aClass;
+  }
+}
+
+/**
+ * Load all files from a given folder
+ * TODO: replace this function with auto load
+ * @param     string     $folder    Path of folder from where we have to include files
+ * @param     string     $suffix    File suffix / extension which we need to load, default is .php
+ * @return    array
+ */
+function include_once_directory($folder, $suffix = '.php')
+{
+  global $path_core;
+  $filter = $path_core . DIRECTORY_SEPARATOR . $folder . DIRECTORY_SEPARATOR . '*' . $suffix;
+  foreach (glob($filter) as $filename) {
+    $aFile[] = $filename;
+    include_once $filename;
+  }
+  return $aFile;
+}
+
+function path_to_namespace($path)
+{
+  global $path_core;
+  if (!is_dir($path)) {
+    $path = dirname($path);
+  }
+  if (substr($path, 0, strlen($path_core)) == $path_core) {
+    $path = substr($path, strlen($path_core));
+  }
+  $clean_path = trim($path, DIRECTORY_SEPARATOR);
+  $namespace = 'ICT\\Core\\' . str_replace(DIRECTORY_SEPARATOR, '\\', $clean_path);
+  return $namespace;
+}
+
+function path_array_to_string($aFile) {
+  if (empty($aFile)) return "";
+  return implode(',', $aFile);
+}
+
+function path_string_to_array($path) {
+  if (empty($path)) return array(); // return empty array if input is empty
+  return explode(',', $path);
+}
+
+function path_prepend($path, $file) {
+  $aPath = path_string_to_array($path);
+  array_unshift($aPath, $file);
+  return path_array_to_string(array_filter($aPath)); // also remove empty
+}
+
+function path_append($path, $file) {
+  $aPath = path_string_to_array($path);
+  $aPath[] = $file;
+  return path_array_to_string(array_filter($aPath)); // also remove empty
+}
+
+/**
+ * Return an array from given bitmask
+ * @param    integer    $mask Integer of the bit
+ * @return    array
+ */
+function bitmask2array($mask = 0)
+{
+  if (is_array($mask)) {
+    return $mask;
+  }
+
+  $return = array();
+  while ($mask > 0) {
+    for ($i = 0, $n = 0; $i <= $mask; $i = 1 * pow(2, $n), $n++) {
+      $end = $i;
+    }
+    $return[] = $end;
+    $mask = $mask - $end;
+  }
+  sort($return);
+  return $return;
+}
+
+function do_login($user)
+{
+  $oUser = null;
+  $oSession = Session::get_instance();
+
+  if (!is_object($user)) {
+    Corelog::log("do_login requested, with user_id $user", Corelog::COMMON);
+    if (empty($user) || $user == User::GUEST) {
+      // load dummy user same as dummy account
+      $oUser = new User(User::GUEST);
+      $oSession->user = $oUser;
+      return $oUser;
+    }
+    $oUser = new User($user);
+  } else {
+    Corelog::log("do_login requested, with object $user->user_id", Corelog::COMMON);
+    $oUser = $user;
+  }
+
+  // if no user found or user is not active
+  if (empty($oUser)) {
+    throw new CoreException(401, "No such user found, can't loging");
+  }
+  if (!$oUser->active) {
+    throw new CoreException(401, "User account disabled, can't loging");
+  }
+
+  $oSession->user = $oUser;
+  Conf\User::load();
+  Corelog::log("do_login, results", Corelog::DEBUG, $oSession->user);
+
+  return $oSession->user;
+}
+
+function do_login_tenant($user)
+{
+  $oTenant = null;
+  $oSession = Session::get_instance();
+
+  if (!is_object($user)) {
+    Corelog::log("do_login requested, with tenant_id $user", Corelog::COMMON);
+    if (empty($user) || $user == Tenant::GUEST) {
+      // load dummy user same as dummy account
+      $oTenant = new Tenant(Tenant::GUEST);
+      $oSession->tenant = $oTenant;
+      return $oTenant;
+    }
+    $oTenant = new Tenant($user);
+  } else {
+    Corelog::log("do_login requested, with object $user->tenant_id", Corelog::COMMON);
+    $oTenant = $user;
+  }
+
+  // if no user found or user is not active
+  if (empty($oTenant)) {
+    throw new CoreException(401, "No such user found, can't loging");
+  }
+  
+  $oSession->tenant = $oTenant;
+  // Conf\User::load();
+  Corelog::log("do_login, results", Corelog::DEBUG, $oSession->tenant);
+
+  return $oSession->tenant;
+}
+
+function do_logout() {
+    session_unset();
+    session_destroy();
+    session_regenerate_id(true);
+}
+
+function json_check($string)
+{
+  json_decode($string);
+  return (json_last_error() == JSON_ERROR_NONE);
+}
+
+function can_access($access_name, $user_id = null)
+{
+  // load user if user_id exist otherwise use crrently logged-in user
+  $oSession = Session::get_instance();
+  if (!empty($user_id)) {
+    $oUser = new User($user_id);
+  } else if (!empty($oSession->user)) {
+    $oUser = $oSession->user;
+  } else {
+    return false;
+  }
+
+  return $oUser->authorize($access_name);
+}
+
+function tenant_can_access($access_name, $tenant_id = null)
+{
+  // load tenant if tenant_id exist otherwise use crrently logged-in user to load its tenant
+  $oSession = Session::get_instance();
+  $tenant_id = ($tenant_id) ? $tenant_id : (($oSession->user) ? $oSession->user->tenant_id : null);
+
+  if ($tenant_id) $oTenant = new Tenant($tenant_id);
+  else return false;
+
+  return $oTenant->authorize($access_name);
+}
+
+function sys_which($cmd, $search_path = NULL, $self_call = false)
+{
+  global $_ENV, $path_lib;
+  $scpath = is_null($search_path) ? $_ENV['PATH'] : $search_path;
+
+  foreach (explode(':', $scpath) as $path) {
+    if (is_executable("$path/$cmd")) {
+      return "$path/$cmd";
+    }
+  }
+
+  if (!$self_call) {
+    $possible_path = '/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:/usr/X11R6/bin:/usr/local/apache/bin:/usr/local/mysql/bin';
+    $possible_path .= ':' . realpath($path_lib);
+    return sys_which($cmd, $possible_path, true);
+  }
+
+  return false;
+}
+function totalrows($query = null, $table = null, $short = null, $aWhere = array())
+{
+  if ($query) {
+    $countQuery = "SELECT COUNT(*) AS cnt FROM ($query) as tmp_table";
+    $countResult = DB::query($table, $countQuery);
+    $row = mysqli_fetch_assoc($countResult);
+    return isset($row['cnt']) ? $row['cnt'] : 0;
+  } else {
+    $countQuery = "SELECT COUNT(*) as cnt FROM " . $table . " $short";
+    if (!empty($aWhere)) {
+      $countQuery .= ' WHERE ' . implode(' AND ', $aWhere);
+    }
+    $countResult = DB::query($table, $countQuery);
+    $row = mysqli_fetch_assoc($countResult);
+    return $row['cnt'];
+  }
+}
+
+function user_time(){
+$userOffset = intval(Session::get_instance()->user->timezone_id);
+return $userOffset;
+}
+
+function is_community_edition()
+{
+  static $cached = null;
+  if ($cached === null) {
+    try {
+      $mode = Conf::get('edition:mode', 'enterprise');
+    } catch (\Exception $e) {
+      $mode = 'enterprise';
+    }
+    $cached = (strtolower(trim((string)$mode)) === 'community');
+  }
+  return $cached;
+}
+
+

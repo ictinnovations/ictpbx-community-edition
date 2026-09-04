@@ -1,0 +1,15 @@
+diff --git a/app/active_calls/resources/service/active_calls.php b/app/active_calls/resources/service/active_calls.php
+old mode 100755
+new mode 100644
+diff --git a/app/email_queue/resources/jobs/email_queue.php b/app/email_queue/resources/jobs/email_queue.php
+old mode 100755
+new mode 100644
+diff --git a/app/email_queue/resources/jobs/email_send.php b/app/email_queue/resources/jobs/email_send.php
+old mode 100755
+new mode 100644
+diff --git a/app/operator_panel/resources/service/operator_panel.php b/app/operator_panel/resources/service/operator_panel.php
+old mode 100755
+new mode 100644
+diff --git a/core/websockets/resources/service/websockets.php b/core/websockets/resources/service/websockets.php
+old mode 100755
+new mode 100644

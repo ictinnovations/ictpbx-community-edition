@@ -1,0 +1,21 @@
+<context name="user_extension">
+  <!-- one or more accounts tags -->
+{% for account in user_accounts %}
+  <extension name="{{ account.phone }}">
+    <condition field="destination_number" expression="^{{ account.username }}|{{ account.phone }}$">
+      <action application="bridge" data="user/{{ account.username }}@{{account.domain}}"/>
+    </condition>
+  </extension>
+{% endfor %}
+  <extension name="external_extension">
+    <condition field="destination_number" expression="^(\+|011|00|01|0)(\d+)$">
+      <action application="transfer" data="$2 XML ictcore_gateway"/>
+    </condition>
+  </extension>
+  <extension name="catch_invalid">
+    <condition field="destination_number" expression=".*">
+      <action application="playback" data="sounds/invalid_extension.wav"/>
+      <action application="hangup"/>
+    </condition>
+  </extension>
+</context>

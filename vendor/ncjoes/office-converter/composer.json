@@ -1,0 +1,24 @@
+{
+    "name" : "ncjoes/office-converter",
+    "description" : "PHP Wrapper for LibreOffice",
+    "keywords" : ["Office","Converter"],
+    "license" : "MIT",
+    "authors" : [
+        {
+            "name" : "Chukwuemeka Nwobodo",
+            "email" : "jc.nwobodo@gmail.com"
+        }
+    ],
+    "require" : {
+        "php" : ">=5.4.4"
+    },
+    "require-dev" : {
+        "phpunit/phpunit" : "5.4.*"
+    },
+    "autoload" : {
+        "psr-4" : {
+            "NcJoes\\OfficeConverter\\" : "src/OfficeConverter"
+        }
+    },
+    "minimum-stability" : "stable"
+}

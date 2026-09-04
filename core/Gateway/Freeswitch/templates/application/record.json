@@ -1,0 +1,24 @@
+{
+  "application_id": "{{ application.application_id }}",
+  "input": {
+    "playback_terminators": "#",
+    "recording_file": "{{ application.recording_file }}",
+    "application_result": "success"
+  },
+  "output": {
+    "error": "",
+    "duration": "record_ms",
+    "recording_file": "recording_file",
+    "result": "application_result"
+  },
+  "batch": [
+    {
+      "name": "gentones",
+      "data": "%(500,0,800)"
+    },
+    {
+      "name": "record",
+      "data": "{{ application.recording_file }} {{ application.max_duration }} 200 3"
+    }
+  ]
+}
