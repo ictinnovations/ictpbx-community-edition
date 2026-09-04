@@ -14,7 +14,6 @@ class FpbxDomain
   // at install time.
   private static $conf_file = '/usr/ictcore/etc/ictcore.conf';
   private static $fpbx_conf_cache = null;
-  private static $fs_domain_cache = null;
 
   private static function fpbx_conf()
   {
@@ -109,51 +108,132 @@ class FpbxDomain
     return $row ? (int)$row['tenant_id'] : null;
   }
 
+  /** Root of the ICTCore-generated FreeSWITCH directory tree. */
+  const DIR_BASE = '/usr/ictcore/etc/freeswitch/directory';
   /**
-   * The domain name FreeSWITCH's directory actually declares.
+   * The generated wrapper holding one <domain> block per tenant.
    *
-   * Every extension, whatever its FusionPBX domain, is included into the single
-   * <domain name="..."> wrapper in fpbx_webrtc.xml. So `user/<ext>@<fusionpbx domain>`
-   * only resolves for the tenant whose FusionPBX domain happens to match that wrapper
-   * (normally tenant 1); for every sub-tenant it is a dead endpoint. Anything that
-   * builds a `user/...@...` dial string must use this name, not get_domain_name().
-   *
-   * Read from the wrapper itself so it tracks the installer, falling back to
-   * ictcore.conf and finally to whatever the caller already resolved.
-   *
-   * @param string|null $fallback used when the wrapper cannot be read
-   * @return string|null
+   * Written inside ICTCore's own tree because /etc/freeswitch/directory is owned by
+   * freeswitch:daemon and php-fpm cannot write there. FreeSWITCH reads it through
+   * /etc/freeswitch/directory/fpbx_webrtc.xml, which is a symlink to this file -- the
+   * same arrangement ictcore.xml already uses.
    */
-  public static function fs_directory_domain($fallback = null)
+  const DIR_WRAPPER = '/usr/ictcore/etc/freeswitch/directory/fpbx_webrtc.xml';
+
+  /**
+   * Per-tenant directory subdirectory for a domain, e.g. .../fpbx_extensions/acme.local.
+   *
+   * Extensions and voicemails are filed per domain so each tenant gets its own FreeSWITCH
+   * <domain>. While every tenant shared one domain, two tenants could not both hold
+   * extension 1001 -- they collided as duplicate <user id> entries and registration
+   * resolved to whichever FreeSWITCH found first.
+   *
+   * @param string $group 'fpbx_extensions' or 'voicemails'
+   */
+  public static function directory_path($group, $domain_name)
   {
-    if (self::$fs_domain_cache === null) {
-      self::$fs_domain_cache = ''; // '' = looked and found nothing usable
-      $file = '/etc/freeswitch/directory/fpbx_webrtc.xml';
-      if (is_readable($file)) {
-        $xml = @file_get_contents($file);
-        if ($xml !== false && preg_match('/<domain\s+name\s*=\s*"([^"]+)"/i', $xml, $m)) {
-          $name = trim($m[1]);
-          // Skip unexpanded FreeSWITCH variables such as $${local_ip_v4}
-          if ($name !== '' && strpos($name, '$') === false) {
-            self::$fs_domain_cache = $name;
-          }
-        }
-      }
-      if (self::$fs_domain_cache === '' && is_readable(self::$conf_file)) {
-        $ini = @parse_ini_file(self::$conf_file, true);
-        foreach ([['domain', 'name'], ['website', 'host']] as [$section, $key]) {
-          if (!empty($ini[$section][$key])) {
-            $name = trim($ini[$section][$key]);
-            if ($name !== '' && strpos($name, '$') === false) {
-              self::$fs_domain_cache = $name;
-              break;
-            }
-          }
-        }
-      }
+    $safe = preg_replace('/[^A-Za-z0-9._-]/', '', (string)$domain_name);
+    return self::DIR_BASE . '/' . $group . '/' . ($safe !== '' ? $safe : 'default');
+  }
+
+  /**
+   * Regenerate the directory wrapper with one <domain> block per FusionPBX domain.
+   *
+   * Called whenever an extension or voicemail is written, so a newly created tenant's
+   * domain appears without anyone regenerating anything by hand. Rewriting the file also
+   * gives FreeSWITCH the mtime change it needs to re-expand the include globs.
+   */
+  public static function write_directory_wrapper(): bool
+  {
+    try {
+      $pdo  = self::fpbx_db();
+      // DISTINCT: v_domains can hold several rows sharing a domain_name (repeated test
+      // provisioning leaves them behind), and a repeated <domain> block is invalid.
+      $rows = $pdo->query("SELECT DISTINCT domain_name FROM v_domains WHERE domain_name IS NOT NULL AND domain_name <> '' ORDER BY domain_name")
+                  ->fetchAll(\PDO::FETCH_COLUMN);
+    } catch (\Throwable $e) {
+      Corelog::log('Directory wrapper: domain list failed: ' . $e->getMessage(), Corelog::WARNING);
+      return false;
+    }
+    if (empty($rows)) {
+      return false;
     }
 
-    return self::$fs_domain_cache !== '' ? self::$fs_domain_cache : $fallback;
+    self::migrate_legacy_directory_files($pdo);
+
+    $dial = '{presence_id=${dialed_user}@${dialed_domain}}${sofia_contact(*/${dialed_user}@${dialed_domain})}';
+    $xml  = '<include>' . "\n";
+    foreach ($rows as $domain_name) {
+      $ext_dir = self::directory_path('fpbx_extensions', $domain_name);
+      $vm_dir  = self::directory_path('voicemails', $domain_name);
+      // The glob must resolve, so make sure both directories exist even when empty.
+      foreach ([$ext_dir, $vm_dir] as $d) {
+        if (!is_dir($d)) { @mkdir($d, 0755, true); }
+      }
+      $safe_name = htmlspecialchars((string)$domain_name, ENT_XML1, 'UTF-8');
+      $xml .= '  <domain name="' . $safe_name . '">' . "\n"
+            . '    <params>' . "\n"
+            . '      <param name="dial-string" value="' . htmlspecialchars($dial, ENT_XML1, 'UTF-8') . '"/>' . "\n"
+            . '    </params>' . "\n"
+            . '    <groups>' . "\n"
+            . '      <group name="default"><users>' . "\n"
+            . '        <X-PRE-PROCESS cmd="include" data="' . $ext_dir . '/*.xml"/>' . "\n"
+            . '      </users></group>' . "\n"
+            . '      <group name="voicemails"><users>' . "\n"
+            . '        <X-PRE-PROCESS cmd="include" data="' . $vm_dir . '/*.xml"/>' . "\n"
+            . '      </users></group>' . "\n"
+            . '    </groups>' . "\n"
+            . '  </domain>' . "\n";
+    }
+    $xml .= '</include>' . "\n";
+
+    if (@file_put_contents(self::DIR_WRAPPER, $xml) === false) {
+      Corelog::log('Directory wrapper: write failed for ' . self::DIR_WRAPPER, Corelog::WARNING);
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Move directory files left flat by the pre-isolation layout into their domain's
+   * subdirectory, so an upgrade does not silently drop every extension out of the
+   * directory until each one happens to be re-saved.
+   *
+   * A file whose row no longer exists is left where it is: it is already an orphan, and
+   * the new globs simply stop serving it, which is the desired outcome.
+   */
+  private static function migrate_legacy_directory_files($pdo): void
+  {
+    $groups = [
+      ['fpbx_extensions', 'v_extensions', 'extension_uuid'],
+      ['voicemails',      'v_voicemails', 'voicemail_uuid'],
+    ];
+    foreach ($groups as [$group, $table, $pk]) {
+      $flat = self::DIR_BASE . '/' . $group;
+      if (!is_dir($flat)) {
+        continue;
+      }
+      foreach ((array)glob($flat . '/*.xml') as $file) {
+        $uuid = basename($file, '.xml');
+        try {
+          $stmt = $pdo->prepare(
+            "SELECT d.domain_name FROM $table t
+               JOIN v_domains d ON d.domain_uuid = t.domain_uuid
+              WHERE t.$pk = :uuid LIMIT 1"
+          );
+          $stmt->execute(['uuid' => $uuid]);
+          $domain_name = $stmt->fetchColumn();
+        } catch (\Throwable $e) {
+          continue; // not a uuid we own, or the lookup failed — leave it alone
+        }
+        if (empty($domain_name)) {
+          continue;
+        }
+        $target_dir = self::directory_path($group, $domain_name);
+        if (!is_dir($target_dir)) { @mkdir($target_dir, 0755, true); }
+        @rename($file, $target_dir . '/' . basename($file));
+      }
+    }
   }
 
   /**

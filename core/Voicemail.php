@@ -179,8 +179,11 @@ class Voicemail
   {
     $dp_dir   = '/usr/ictcore/etc/freeswitch/dialplan/voicemails';
     $dp_file  = $dp_dir . '/' . $this->voicemail_uuid . '.xml';
-    $dir_dir  = '/usr/ictcore/etc/freeswitch/directory/voicemails';
-    $dir_file = $dir_dir . '/' . $this->voicemail_uuid . '.xml';
+    // Voicemail users must sit inside the same <domain> block as that tenant's extensions,
+    // because mod_voicemail resolves a mailbox with a domain-scoped directory lookup.
+    $vm_domain = FpbxDomain::get_domain_name($this->domain_uuid);
+    $dir_dir   = FpbxDomain::directory_path('voicemails', $vm_domain);
+    $dir_file  = $dir_dir . '/' . $this->voicemail_uuid . '.xml';
 
     if ($delete) {
       if (file_exists($dp_file))  @unlink($dp_file);
@@ -191,7 +194,7 @@ class Voicemail
       // directory declares. Passing the FusionPBX domain name (tenant.local, ...) makes
       // that lookup fail for every sub-tenant, so use the directory's own domain.
       $fpbx_domain = FpbxDomain::get_domain_name($this->domain_uuid) ?: 'localhost';
-      $domain      = FpbxDomain::fs_directory_domain($fpbx_domain);
+      $domain      = $fpbx_domain;
       $vm_id    = htmlspecialchars((string)$this->voicemail_id, ENT_XML1, 'UTF-8');
       $e_dom    = htmlspecialchars($domain, ENT_XML1, 'UTF-8');
       $vm_pass  = htmlspecialchars((string)($this->voicemail_password ?: $this->voicemail_id), ENT_XML1, 'UTF-8');
@@ -227,7 +230,9 @@ class Voicemail
     }
 
     @touch('/etc/freeswitch/dialplan/ictcore.xml');
-    @touch('/etc/freeswitch/directory/fpbx_webrtc.xml');
+    // Rewriting the wrapper changes its mtime, which is what makes FreeSWITCH re-expand
+    // the include globs -- a touch alone would not pick up a new tenant's domain block.
+    FpbxDomain::write_directory_wrapper();
 
     try {
       if (class_exists('\\ICT\\Core\\Realtime')) {

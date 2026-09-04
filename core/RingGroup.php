@@ -244,7 +244,7 @@ class RingGroup
       // FreeSWITCH directory -- which declares one domain for every tenant. Using the
       // FusionPBX domain name here (tenant.local, acme.local, ...) produces an endpoint
       // FreeSWITCH cannot resolve, so sub-tenant ring groups never ring.
-      $bridge_domain = FpbxDomain::fs_directory_domain($domain_name);
+      $bridge_domain = $domain_name;
 
       // Fetch ring group destinations
       $bridge_string = 'error/unallocated';

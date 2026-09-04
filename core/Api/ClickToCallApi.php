@@ -49,7 +49,7 @@ class ClickToCallApi extends Api
     // Endpoints are addressed at the domain the FreeSWITCH directory declares, which is
     // one domain for every tenant -- the FusionPBX domain name (tenant.local, ...) is not
     // a directory FreeSWITCH knows, so it would never resolve for a sub-tenant.
-    $dial_domain = FpbxDomain::fs_directory_domain($domain_name);
+    $dial_domain = $domain_name;
 
     // bgapi hands back a Job-UUID immediately and the originate result arrives
     // asynchronously, so the command output can never reveal a failed call. Check the

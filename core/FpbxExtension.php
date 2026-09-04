@@ -329,19 +329,19 @@ class FpbxExtension
 
   private function sync_fs_directory(bool $delete = false): void
   {
-    global $path_etc;
-    $ext_dir    = $path_etc . '/freeswitch/directory/fpbx_extensions';
-    $domain_file = '/etc/freeswitch/directory/fpbx_webrtc.xml';
-    $ext_file   = $ext_dir . '/' . $this->extension_uuid . '.xml';
+    // Filed under this extension's own domain, so two tenants may hold the same number
+    // without colliding as duplicate <user id> entries in a single shared domain.
+    $domain_name = FpbxDomain::get_domain_name($this->domain_uuid);
+    $ext_dir     = FpbxDomain::directory_path('fpbx_extensions', $domain_name);
+    $ext_file    = $ext_dir . '/' . $this->extension_uuid . '.xml';
 
     if ($delete) {
       if (file_exists($ext_file)) {
         @unlink($ext_file);
       }
-      // Touch domain file so FS re-expands the glob on next reloadxml
-      if (file_exists($domain_file)) {
-        touch($domain_file);
-      }
+      // Rewriting the wrapper also changes its mtime, which is what makes FreeSWITCH
+      // re-expand the include globs on the next reloadxml.
+      FpbxDomain::write_directory_wrapper();
       return;
     }
 
@@ -350,32 +350,12 @@ class FpbxExtension
       if (file_exists($ext_file)) {
         @unlink($ext_file);
       }
-      // Touch domain file so FS re-expands the glob on next reloadxml
-      if (file_exists($domain_file)) {
-        touch($domain_file);
-      }
+      FpbxDomain::write_directory_wrapper();
       return;
     }
 
-    // Ensure per-extension directory exists
     if (!is_dir($ext_dir)) {
       mkdir($ext_dir, 0755, true);
-    }
-
-    // Create domain wrapper file once if missing
-    if (!file_exists($domain_file)) {
-      file_put_contents($domain_file,
-        '<include>' . "\n" .
-        '  <domain name="$${local_ip_v4}">' . "\n" .
-        '    <params>' . "\n" .
-        '      <param name="dial-string" value="{presence_id=${dialed_user}@${dialed_domain}}${sofia_contact(*/${dialed_user}@${dialed_domain})}"/>' . "\n" .
-        '    </params>' . "\n" .
-        '    <groups><group name="default"><users>' . "\n" .
-        '      <X-PRE-PROCESS cmd="include" data="' . $ext_dir . '/*.xml"/>' . "\n" .
-        '    </users></group></groups>' . "\n" .
-        '  </domain>' . "\n" .
-        '</include>' . "\n"
-      );
     }
 
     $ext  = htmlspecialchars($this->extension, ENT_XML1);
@@ -403,9 +383,9 @@ class FpbxExtension
       '</user>' . "\n"
     );
 
-    // Touch domain file so FS re-expands the *.xml glob on next reloadxml.
-    // When implementing per-tenant domains, change $domain_file to the tenant's domain wrapper.
-    touch($domain_file);
+    // Regenerate the wrapper: picks up a brand-new tenant's domain block and gives
+    // FreeSWITCH the mtime change it needs to re-expand the globs.
+    FpbxDomain::write_directory_wrapper();
   }
 
   /**
@@ -471,9 +451,7 @@ class FpbxExtension
       return null;
     }
 
-    $dial_domain = FpbxDomain::fs_directory_domain(
-      FpbxDomain::get_domain_name($this->domain_uuid)
-    );
+    $dial_domain = FpbxDomain::get_domain_name($this->domain_uuid);
 
     $legs = [];
     foreach ($rows as $r) {
