@@ -65,6 +65,12 @@ class TimeCondition
     }
   }
 
+  /** Remove a trailing " XML <context>" from a stored transfer target. */
+  private static function strip_context($data)
+  {
+    return preg_replace('/\s+XML\s+\S+$/i', '', (string)$data);
+  }
+
   private function load_details($pdo)
   {
     $stmt = $pdo->prepare(
@@ -91,11 +97,14 @@ class TimeCondition
           $this->tc_wday_stop  = trim($we);
         }
       }
+      // save() writes these as "DEST XML <context>", so strip the suffix back off:
+      // the model exposes the bare dial string. Without this the value round-trips
+      // as "DEST XML ctx XML ctx" and the UI cannot match it against a destination.
       if ($tag === 'action' && $type === 'transfer') {
-        $this->tc_open_destination = $data;
+        $this->tc_open_destination = self::strip_context($data);
       }
       if ($tag === 'anti-action' && $type === 'transfer') {
-        $this->tc_closed_destination = $data;
+        $this->tc_closed_destination = self::strip_context($data);
       }
     }
   }
