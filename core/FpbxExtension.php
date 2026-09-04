@@ -40,6 +40,8 @@ class FpbxExtension
   public $user_record                             = 'none';
   public $absolute_codec_string                   = null;
   public $follow_me_enabled                       = false;
+  // Set by FusionPBX when a Follow Me is attached; read-only here, never written back to PG.
+  public $follow_me_uuid                          = null;
 
   // Call forwarding
   public $forward_all_enabled                     = false;
@@ -59,6 +61,8 @@ class FpbxExtension
   public $user_id                                 = null;
   // Resolved on load from MariaDB account.created_by
   public $linked_user_id                          = null;
+  /** Number this extension was loaded with, so a renumber can follow its account row. */
+  private $_orig_extension                        = null;
 
   public function __construct($extension_uuid = null)
   {
@@ -82,6 +86,9 @@ class FpbxExtension
         $this->$k = $v;
       }
     }
+    // Remember the number this extension was loaded with, so a renumber can still find
+    // the ICTCore account row filed under the old one. See sync_ictcore_account().
+    $this->_orig_extension = $this->extension;
     // Cross-query linked user from MariaDB account
     if (!empty($this->extension)) {
       $res  = \ICT\Core\DB::query('account',
@@ -282,17 +289,28 @@ class FpbxExtension
       "SELECT account_id FROM account WHERE phone = '%phone%' AND type IN ('account','child_account') LIMIT 1",
       ['phone' => $this->extension]);
     $acct     = mysqli_fetch_assoc($res);
+
+    // A renumbered extension still owns the account row filed under its previous number.
+    // Follow it, or the insert below would try to add a second row with the same username
+    // and hit the unique (type, username) key -- renumbering used to fail with a raw 1062.
+    if (!$acct && !empty($this->_orig_extension) && $this->_orig_extension !== $this->extension) {
+      $res_old = \ICT\Core\DB::query('account',
+        "SELECT account_id FROM account WHERE phone = '%phone%' AND type IN ('account','child_account') LIMIT 1",
+        ['phone' => $this->_orig_extension]);
+      $acct = mysqli_fetch_assoc($res_old);
+    }
+
     $username = trim($this->effective_caller_id_name ?: $this->extension);
     $email    = $this->fax_email ?: null;
     if ($acct) {
       if ($this->user_id !== null) {
         \ICT\Core\DB::query('account',
-          "UPDATE account SET username = '%username%', email = '%email%', created_by = %uid% WHERE account_id = %id%",
-          ['username' => $username, 'email' => $email, 'uid' => (int)$this->user_id, 'id' => $acct['account_id']]);
+          "UPDATE account SET username = '%username%', phone = '%phone%', email = '%email%', created_by = %uid% WHERE account_id = %id%",
+          ['username' => $username, 'phone' => $this->extension, 'email' => $email, 'uid' => (int)$this->user_id, 'id' => $acct['account_id']]);
       } else {
         \ICT\Core\DB::query('account',
-          "UPDATE account SET username = '%username%', email = '%email%' WHERE account_id = %id%",
-          ['username' => $username, 'email' => $email, 'id' => $acct['account_id']]);
+          "UPDATE account SET username = '%username%', phone = '%phone%', email = '%email%' WHERE account_id = %id%",
+          ['username' => $username, 'phone' => $this->extension, 'email' => $email, 'id' => $acct['account_id']]);
       }
     } else {
       if ($this->user_id !== null) {
@@ -364,10 +382,18 @@ class FpbxExtension
     $pass = htmlspecialchars($this->password ?? '', ENT_XML1);
     $name = htmlspecialchars($this->effective_caller_id_name ?: $this->extension, ENT_XML1);
 
+    // Follow Me overrides how this user is reached: instead of the domain's default
+    // sofia_contact lookup, ring the configured destinations. Absent or disabled, the
+    // param is omitted and the user inherits the domain default.
+    $follow_me = $this->follow_me_dial_string();
+    $dial_param = ($follow_me === null) ? ''
+      : '    <param name="dial-string" value="' . htmlspecialchars($follow_me, ENT_XML1) . '"/>' . "\n";
+
     file_put_contents($ext_file,
       '<user id="' . $ext . '">' . "\n" .
       '  <params>' . "\n" .
       '    <param name="password" value="' . $pass . '"/>' . "\n" .
+      $dial_param .
       '  </params>' . "\n" .
       '  <variables>' . "\n" .
       '    <variable name="user_context" value="ictcore"/>' . "\n" .
@@ -380,6 +406,112 @@ class FpbxExtension
     // Touch domain file so FS re-expands the *.xml glob on next reloadxml.
     // When implementing per-tenant domains, change $domain_file to the tenant's domain wrapper.
     touch($domain_file);
+  }
+
+  /**
+   * Rewrite this extension's directory entry and reload FreeSWITCH, without touching the
+   * database. Follow Me lives in its own tables, so saving one has to refresh the owning
+   * extension's <user> or the new dial-string never reaches FreeSWITCH.
+   */
+  public function resync_freeswitch(): void
+  {
+    $this->sync_fs_directory();
+    try {
+      Realtime::run_cmd('reloadxml');
+    } catch (\Throwable $e) {
+      Corelog::log('Follow Me reloadxml failed: ' . $e->getMessage(), Corelog::WARNING);
+    }
+  }
+
+  /**
+   * Build the FreeSWITCH dial-string that implements Follow Me for this extension.
+   *
+   * Follow Me was configured in the UI and stored in v_follow_me / v_follow_me_destinations
+   * but never reached FreeSWITCH, so it did nothing. Rather than a standalone dialplan
+   * extension, it belongs on the directory <user>: overriding that user's dial-string means
+   * every path that reaches the extension -- a direct dial, a ring group, an IVR transfer --
+   * follows the same list, which is what callers expect.
+   *
+   * Each destination becomes a bridge leg carrying its own delay and timeout. Legs are
+   * comma-joined so FreeSWITCH starts them in parallel and leg_delay_start staggers them,
+   * which is how a delay of 0 rings immediately and a later one rings only if the call is
+   * still alive. Internal numbers ring the registered device directly; anything else goes
+   * back through the dialplan as a loopback so outbound routes and billing still apply.
+   *
+   * @return string|null null when Follow Me is off or has no usable destination
+   */
+  private function follow_me_dial_string(): ?string
+  {
+    if (empty($this->follow_me_uuid)) {
+      return null;
+    }
+
+    try {
+      $pdo  = FpbxDomain::fpbx_db();
+      // Gate on the follow_me row's own flag: that is what the Follow Me UI writes.
+      // v_extensions.follow_me_enabled is never set by FollowMe::save(), so relying on
+      // the extension column would leave Follow Me permanently off.
+      $stmt = $pdo->prepare(
+        "SELECT d.follow_me_destination, d.follow_me_delay, d.follow_me_timeout
+           FROM v_follow_me f
+           JOIN v_follow_me_destinations d ON d.follow_me_uuid = f.follow_me_uuid
+          WHERE f.follow_me_uuid = :uuid
+            AND f.follow_me_enabled = 'true'
+            AND d.follow_me_destination IS NOT NULL
+            AND d.follow_me_destination <> ''
+          ORDER BY d.follow_me_order NULLS LAST, d.follow_me_delay"
+      );
+      $stmt->execute(['uuid' => $this->follow_me_uuid]);
+      $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+    } catch (\Throwable $e) {
+      Corelog::log('Follow Me lookup failed: ' . $e->getMessage(), Corelog::WARNING);
+      return null;
+    }
+    if (empty($rows)) {
+      return null;
+    }
+
+    $dial_domain = FpbxDomain::fs_directory_domain(
+      FpbxDomain::get_domain_name($this->domain_uuid)
+    );
+
+    $legs = [];
+    foreach ($rows as $r) {
+      $dest = trim((string)$r['follow_me_destination']);
+      // Same validation the dialplan-facing APIs use; a bad value would land in a dial string.
+      if ($dest === '' || !preg_match('/^\+?[0-9*#]{2,20}$/', $dest)) {
+        continue;
+      }
+      $delay   = max(0, (int)$r['follow_me_delay']);
+      $timeout = (int)$r['follow_me_timeout'] ?: 30;
+      $target  = $this->is_local_extension($dest)
+        ? sprintf('user/%s@%s', $dest, $dial_domain)
+        : sprintf('loopback/%s/ictcore', $dest);
+      $legs[] = sprintf('[leg_delay_start=%d,leg_timeout=%d]%s', $delay, $timeout, $target);
+    }
+
+    return empty($legs) ? null : '{ignore_early_media=true}' . implode(',', $legs);
+  }
+
+  /** Whether a Follow Me destination is an extension in this extension's own domain. */
+  private function is_local_extension(string $dest): bool
+  {
+    try {
+      $pdo  = FpbxDomain::fpbx_db();
+      $stmt = $pdo->prepare(
+        "SELECT 1 FROM v_extensions WHERE domain_uuid = :d AND extension = :e LIMIT 1"
+      );
+      $stmt->execute(['d' => $this->domain_uuid, 'e' => $dest]);
+      return (bool)$stmt->fetchColumn();
+    } catch (\Throwable $e) {
+      return false;
+    }
+  }
+
+  /** PostgreSQL hands booleans back as 't'/'f'; the API may send real bools or '1'. */
+  private static function is_true($v): bool
+  {
+    return $v === true || $v === 1 || $v === '1' || $v === 't' || $v === 'true';
   }
 
   private function generate_uuid()

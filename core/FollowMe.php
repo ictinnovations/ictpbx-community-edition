@@ -65,11 +65,18 @@ class FollowMe
 
   public function save()
   {
-    $domain_uuid       = FpbxDomain::get_domain_uuid($this->tenant_id);
-    if ($domain_uuid === null) { /* null-domain-guard */
-      throw new \ICT\Core\CoreException(409, 'No FusionPBX domain assigned to this tenant. Contact an administrator.');
+    // Resolve the domain only for a new record. tenant_id is not a v_follow_me column, so
+    // it is null on every load; re-resolving would fall back to "first enabled domain" and
+    // silently move a sub-tenant's Follow Me into another tenant's domain on any update --
+    // after which its owner gets a 403 from _assert_pbx_domain and can no longer delete it.
+    if (empty($this->domain_uuid)) {
+      $domain_uuid = FpbxDomain::get_domain_uuid($this->tenant_id);
+      if ($domain_uuid === null) { /* null-domain-guard */
+        throw new \ICT\Core\CoreException(409, 'No FusionPBX domain assigned to this tenant. Contact an administrator.');
+      }
+      $this->domain_uuid = $domain_uuid;
     }
-    $this->domain_uuid = $domain_uuid;
+    $domain_uuid = $this->domain_uuid;
     $pdo               = FpbxDomain::fpbx_db();
 
     $bool_enabled      = ($this->follow_me_enabled === 'true' || $this->follow_me_enabled === true) ? 'true' : 'false';
@@ -114,6 +121,11 @@ class FollowMe
     } catch (\PDOException $e) {
       throw new CoreException(500, 'Follow Me save failed: ' . $e->getMessage());
     }
+
+    // Follow Me is implemented as the owning extension's directory dial-string, so the
+    // extension entry has to be rewritten for the change to reach FreeSWITCH.
+    $this->resync_extension($this->extension_uuid);
+
     return $this->follow_me_uuid;
   }
 
@@ -150,6 +162,16 @@ class FollowMe
   {
     if (empty($this->follow_me_uuid)) { throw new CoreException(400, 'Missing uuid'); }
     $pdo = FpbxDomain::fpbx_db();
+
+    // Note which extension owned this before the link is cleared, so its directory entry
+    // can be rewritten afterwards -- otherwise it keeps the deleted Follow Me dial-string.
+    $owner = null;
+    try {
+      $s = $pdo->prepare("SELECT extension_uuid FROM v_extensions WHERE follow_me_uuid = ? LIMIT 1");
+      $s->execute([$this->follow_me_uuid]);
+      $owner = $s->fetchColumn() ?: null;
+    } catch (\PDOException $e) { /* non-fatal */ }
+
     try {
       $pdo->prepare("UPDATE v_extensions SET follow_me_uuid = NULL WHERE follow_me_uuid = ?")
           ->execute([$this->follow_me_uuid]);
@@ -160,7 +182,36 @@ class FollowMe
     } catch (\PDOException $e) {
       throw new CoreException(500, 'Follow Me delete failed: ' . $e->getMessage());
     }
+
+    $this->resync_extension($owner);
+
     return true;
+  }
+
+  /**
+   * Rewrite the owning extension's FreeSWITCH directory entry. Never fatal: the Follow Me
+   * record itself is already saved, and a reload failure must not fail the request.
+   */
+  private function resync_extension($extension_uuid): void
+  {
+    // extension_uuid is not a v_follow_me column, so it is unset on a loaded record --
+    // an update would otherwise resync nothing and the old dial-string would survive.
+    if (empty($extension_uuid) && !empty($this->follow_me_uuid)) {
+      try {
+        $pdo = FpbxDomain::fpbx_db();
+        $s = $pdo->prepare("SELECT extension_uuid FROM v_extensions WHERE follow_me_uuid = ? LIMIT 1");
+        $s->execute([$this->follow_me_uuid]);
+        $extension_uuid = $s->fetchColumn() ?: null;
+      } catch (\PDOException $e) { /* fall through */ }
+    }
+    if (empty($extension_uuid)) {
+      return;
+    }
+    try {
+      (new FpbxExtension($extension_uuid))->resync_freeswitch();
+    } catch (\Throwable $e) {
+      Corelog::log('Follow Me extension resync failed: ' . $e->getMessage(), Corelog::WARNING);
+    }
   }
 
   private static function generate_uuid()
