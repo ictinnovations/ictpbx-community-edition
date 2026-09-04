@@ -46,19 +46,45 @@ class ClickToCallApi extends Api
       throw new CoreException(409, 'Unable to resolve PBX domain name');
     }
 
+    // Endpoints are addressed at the domain the FreeSWITCH directory declares, which is
+    // one domain for every tenant -- the FusionPBX domain name (tenant.local, ...) is not
+    // a directory FreeSWITCH knows, so it would never resolve for a sub-tenant.
+    $dial_domain = FpbxDomain::fs_directory_domain($domain_name);
+
+    // bgapi hands back a Job-UUID immediately and the originate result arrives
+    // asynchronously, so the command output can never reveal a failed call. Check the
+    // leg we are about to ring is actually registered -- the failure that really happens
+    // -- so the caller gets an error instead of a cheerful 200 for a call that never was.
+    $contact = trim((string)Realtime::run_cmd(sprintf('sofia_contact */%s@%s', $from_ext, $dial_domain)));
+    if ($contact === '' || stripos($contact, 'error/') === 0 || stripos($contact, 'user_not_registered') !== false) {
+      throw new CoreException(409, "Extension $from_ext is not registered, so it cannot be called.");
+    }
+
     $cmd = sprintf(
       'bgapi originate {origination_caller_id_number=%s,ignore_early_media=true}user/%s@%s %s XML ictcore',
-      $to_number, $from_ext, $domain_name, $to_number
+      $to_number, $from_ext, $dial_domain, $to_number
     );
 
     $out = Realtime::run_cmd($cmd);
-    Corelog::log("Click-to-call $from_ext -> $to_number on $domain_name: " . trim((string)$out), Corelog::CRUD);
+    Corelog::log("Click-to-call $from_ext -> $to_number on $dial_domain: " . trim((string)$out), Corelog::CRUD);
 
-    // bgapi returns a Job-UUID line on success.
+    // Still worth catching, for the errors bgapi *can* report synchronously.
     if (stripos((string)$out, '-ERR') !== false) {
       throw new CoreException(417, 'Originate failed: ' . trim((string)$out));
     }
 
-    return ['status' => 'ok', 'from_ext' => $from_ext, 'to_number' => $to_number];
+    // The originate is queued, not completed: report the job so the outcome is traceable
+    // in the FreeSWITCH log rather than implying the call connected.
+    $job_uuid = null;
+    if (preg_match('/Job-UUID:\s*([0-9a-f-]+)/i', (string)$out, $m)) {
+      $job_uuid = $m[1];
+    }
+
+    return [
+      'status'    => 'queued',
+      'from_ext'  => $from_ext,
+      'to_number' => $to_number,
+      'job_uuid'  => $job_uuid,
+    ];
   }
 }
