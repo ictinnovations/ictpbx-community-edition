@@ -253,6 +253,20 @@ systemctl enable --now php-fpm >/dev/null 2>&1 || true
 hdr "Step 4: Memcached"
 
 quiet dnf install -y memcached
+# rngd fails continuously on KVM guests with no hardware entropy source, which
+# leaves systemd degraded and sends people hunting a problem that is not theirs.
+# EL9 kernels take entropy from virtio-rng directly, so rngd has nothing to add
+# inside a VM. Mask it only when we really are virtualised and it is already
+# failing, so bare metal is untouched. Reported by @infotek on Harvester.
+if systemctl is-failed --quiet rngd.service 2>/dev/null \
+   && [[ "$(systemd-detect-virt 2>/dev/null || echo none)" != "none" ]]; then
+    if systemctl mask --now rngd.service >/dev/null 2>&1; then
+        ok "Masked rngd.service (virtual guest, kernel uses virtio-rng)"
+    else
+        warn "Could not mask rngd.service; systemd may keep reporting degraded"
+    fi
+fi
+
 quiet systemctl enable --now memcached
 ok "Memcached installed (port 11211)"
 
@@ -1049,8 +1063,15 @@ CREATE TABLE IF NOT EXISTS login_attempt (
 
 -- #13 spool.cost column (referenced by transmission listing)
 ALTER TABLE spool ADD COLUMN IF NOT EXISTS cost DECIMAL(10,4) DEFAULT 0;
+
+-- usr.secret: User.php reads it on load and writes it on every save, but older
+-- schemas only created appsecret, so user create/update failed on an unknown
+-- column. Fixed in the base schema; this repairs installs made before that.
+ALTER TABLE usr ADD COLUMN IF NOT EXISTS secret VARCHAR(128) NULL AFTER passwd;
+UPDATE usr SET secret = SUBSTRING(REPLACE(REPLACE(TO_BASE64(RANDOM_BYTES(16)),'+','-'),'/','_'),1,22)
+  WHERE secret IS NULL OR secret = '';
 SQLFIX
-ok "Post-schema hardening applied (login_attempt, spool.cost)"
+ok "Post-schema hardening applied (login_attempt, spool.cost, usr.secret)"
 
 # Seed role+admin data — only if usr table is empty (avoids duplicate-key on re-run).
 USR_COUNT=$(mysql -u root -p"${MARIADB_ROOT_PASS}" -N -B -e "SELECT COUNT(*) FROM ictfax.usr;" 2>/dev/null || echo 0)
