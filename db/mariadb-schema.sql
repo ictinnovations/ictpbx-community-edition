@@ -1343,6 +1343,7 @@ CREATE TABLE `usr` (
   `role_id` int(11) unsigned NOT NULL DEFAULT 0,
   `username` varchar(64) DEFAULT NULL,
   `passwd` varchar(128) DEFAULT NULL,
+  `secret` varchar(128) DEFAULT NULL,
   `first_name` varchar(128) DEFAULT NULL,
   `last_name` varchar(128) DEFAULT NULL,
   `phone` varchar(16) DEFAULT NULL,
