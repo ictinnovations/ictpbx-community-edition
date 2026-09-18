@@ -146,6 +146,23 @@ fi
 : "${SIGNALWIRE_TOKEN:=}"
 echo ""
 
+# EL major version, derived once here and reused everywhere below. This used to be
+# worked out in four separate places, two of which disagreed about the fallback
+# (one defaulted to 9, another to 8). /etc/os-release is authoritative and is read in
+# a subshell so its NAME, VERSION and ID do not leak into this script. rpm -E is the
+# fallback for the odd image that ships no os-release.
+# The pipefail trap that PR #1 fixed lived in this same area: never probe for this
+# with `dnf repolist | grep -q`, because grep exits early, dnf takes SIGPIPE, and the
+# pipeline returns 141 under `set -o pipefail`.
+EL_VER=""
+if [ -r /etc/os-release ]; then
+    EL_VER="$( . /etc/os-release && echo "${VERSION_ID%%.*}" )"
+fi
+[[ "$EL_VER" =~ ^[0-9]+$ ]] || EL_VER="$(rpm -E %rhel 2>/dev/null || true)"
+[[ "$EL_VER" =~ ^[0-9]+$ ]] || fail "Could not determine the Enterprise Linux major version. Supported: Rocky Linux 8/9, CentOS Stream 8/9."
+ARCH="$(uname -m)"
+info "Detected Enterprise Linux ${EL_VER} on ${ARCH}"
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # STEP 1 — System packages & repos
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -154,14 +171,7 @@ hdr "Step 1: System packages & repos"
 info "Enabling EPEL, PowerTools / CRB..."
 quiet dnf install -y epel-release dnf-utils
 # Rocky 8 = powertools, Rocky 9 = crb
-if [ -f /etc/os-release ]; then
-    . /etc/os-release
-    OS_MAJOR_VERSION="${VERSION_ID%%.*}"
-else
-    OS_MAJOR_VERSION=$(rpm -E %rhel)
-fi
-
-if [ "${OS_MAJOR_VERSION:-0}" -ge 9 ]; then
+if [ "$EL_VER" -ge 9 ]; then
     quiet dnf config-manager --set-enabled crb
 else
     quiet dnf config-manager --set-enabled powertools
@@ -200,11 +210,10 @@ ok "Apache $(httpd -v 2>&1 | head -1 | awk '{print $3}') installed"
 hdr "Step 3: PHP 8.3"
 
 info "Installing Remi repo for PHP 8.3..."
-# Detect EL major version (Finding #2). The previous "try EL8 then EL9" pattern
-# always printed a scary "Problem: conflicting requests" block on EL9 boxes
-# before the EL9 RPM succeeded — functional but misleading. Pick the right RPM
-# directly via `rpm -E %rhel` (works on Rocky 8/9 + CentOS Stream 8/9).
-EL_VER=$(rpm -E %rhel 2>/dev/null || echo 9)
+# Finding #2: the previous "try EL8 then EL9" pattern always printed a scary
+# "Problem: conflicting requests" block on EL9 boxes before the EL9 RPM succeeded,
+# functional but misleading. Pick the right RPM directly using the version detected
+# at the top of this script.
 quiet dnf install -y "https://rpms.remirepo.net/enterprise/remi-release-${EL_VER}.rpm"
 quiet dnf module reset php -y
 quiet dnf module enable php:remi-8.3 -y
@@ -273,11 +282,10 @@ ok "Database 'ictfax' and user 'ictfax'@'localhost' created"
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 hdr "Step 6: PostgreSQL 16"
 
-_EL_VER=$(rpm -E '%{rhel}' 2>/dev/null || echo 8)
-_ARCH=$(uname -m)
+
 # pgdg repo install is tolerated to fail (already installed); the actual
 # postgresql16 install below is the load-bearing one and must succeed.
-quiet dnf install -y "https://download.postgresql.org/pub/repos/yum/reporpms/EL-${_EL_VER}-${_ARCH}/pgdg-redhat-repo-latest.noarch.rpm" || true
+quiet dnf install -y "https://download.postgresql.org/pub/repos/yum/reporpms/EL-${EL_VER}-${ARCH}/pgdg-redhat-repo-latest.noarch.rpm" || true
 quiet dnf module disable postgresql -y || true
 quiet dnf install -y postgresql16-server postgresql16
 /usr/pgsql-16/bin/postgresql-16-setup initdb >/dev/null 2>&1 || true
@@ -320,7 +328,7 @@ hdr "Step 7: FreeSWITCH 1.10.12"
 info "Adding okay.com.mx repo (FreeSWITCH packages)..."
 # okay-release defines the [okay] repo via an RPM (handles EL release detection).
 rpm -q okay-release &>/dev/null || \
-    rpm -ivh "http://repo.okay.com.mx/centos/$(rpm -E %{rhel})/x86_64/release/okay-release-1-5.el$(rpm -E %{rhel}).noarch.rpm" 2>>"$LOG" \
+    rpm -ivh "http://repo.okay.com.mx/centos/${EL_VER}/x86_64/release/okay-release-1-5.el${EL_VER}.noarch.rpm" 2>>"$LOG" \
     || cat > /etc/yum.repos.d/okay.repo <<'REPO'
 [okay]
 name=Extra OKay Packages for Enterprise Linux - $basearch
