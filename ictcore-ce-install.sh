@@ -204,6 +204,29 @@ ok "Apache $(httpd -v 2>&1 | head -1 | awk '{print $3}') installed"
 [[ -f /etc/httpd/conf.d/welcome.conf ]] && \
     mv /etc/httpd/conf.d/welcome.conf /etc/httpd/conf.d/welcome.conf.disabled
 
+# The placeholder docroot is empty until the Angular CE frontend is installed, which
+# means "/" answered 403 and gave no clue that the PBX lives at /pbx. Leave a
+# signpost there instead.
+mkdir -p /var/www/html
+if [[ ! -s /var/www/html/index.html ]]; then
+    cat > /var/www/html/index.html <<'LANDING'
+<!doctype html>
+<meta charset="utf-8">
+<title>ICTPBX Community Edition</title>
+<style>body{font:16px/1.6 system-ui,sans-serif;max-width:34rem;margin:4rem auto;padding:0 1rem}
+code{background:#f4f4f5;padding:.1rem .3rem;border-radius:3px}</style>
+<h1>ICTPBX Community Edition</h1>
+<p>The backend is installed and running. This page is a placeholder.</p>
+<ul>
+  <li><a href="/pbx">/pbx</a> for the FusionPBX interface</li>
+  <li><a href="/api">/api</a> for the ICTCore REST API</li>
+</ul>
+<p>The ICTPBX dashboard replaces this page once you install the frontend:<br>
+<code>git clone https://github.com/ictinnovations/ictpbx-community-edition-gui.git /usr/ictpbxx</code></p>
+LANDING
+    chmod 644 /var/www/html/index.html
+fi
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # STEP 3 — PHP 8.3
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -690,6 +713,14 @@ fi
 
 chown -R apache:apache "$FUSIONPBX_DIR"
 ok "Ownership set: apache:apache"
+
+# php_value in .htaccess is a mod_php directive. Under PHP-FPM Apache rejects it
+# with "Invalid command" and returns 500 for the whole tree. The equivalents are
+# set in the FPM pool in Step 2, so comment these out rather than lose the tree.
+if [[ -f "$FUSIONPBX_DIR/.htaccess" ]] && grep -q "^[[:space:]]*php_value" "$FUSIONPBX_DIR/.htaccess"; then
+    sed -i -E 's/^([[:space:]]*)(php_value)/\1# \2/' "$FUSIONPBX_DIR/.htaccess"
+    ok "Commented php_value directives in FusionPBX .htaccess (set in the FPM pool instead)"
+fi
 
 # mod_lua symlink: FreeSWITCH looks for app.lua in $${script_dir} which is
 # /usr/share/freeswitch/scripts (empty after RPM install). Without this symlink
@@ -1351,6 +1382,14 @@ if [[ -f /usr/ictpbxx/dist/index.html ]]; then
         Header set Expires "0"
     </FilesMatch>
 
+    # FusionPBX UI under /pbx. Kept off "/" deliberately, per the note above.
+    Alias /pbx /var/www/fusionpbx
+    <Directory /var/www/fusionpbx>
+        Options FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+
     # ICTCore REST API under /api
     Alias /api /usr/ictcore/wwwroot
     <Directory /usr/ictcore/wwwroot>
@@ -1387,6 +1426,14 @@ else
     ServerName _default_
 
     <Directory /var/www/html>
+        Options FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+
+    # FusionPBX UI under /pbx. Kept off "/" deliberately, per the note above.
+    Alias /pbx /var/www/fusionpbx
+    <Directory /var/www/fusionpbx>
         Options FollowSymLinks
         AllowOverride All
         Require all granted
@@ -1448,6 +1495,22 @@ else
 fi
 ok "Apache + PHP-FPM configured to run as ictcore"
 
+# Upload limits belong in the FPM pool, not in .htaccess. FusionPBX ships php_value
+# directives in its own .htaccess, which mod_php understood and mod_proxy_fcgi does
+# not, so Apache answers 500 on every page under AllowOverride All. We can't change
+# upstream, so set the real values here and neutralise the directives after the
+# clone (Step 9). Reported by @infotek on Rocky 9 / PHP 8.3.
+if ! grep -q '^php_admin_value\[upload_max_filesize\]' /etc/php-fpm.d/www.conf; then
+    cat >> /etc/php-fpm.d/www.conf <<'FPMLIMITS'
+
+; Limits FusionPBX otherwise tries to set from .htaccess via php_value.
+php_admin_value[upload_max_filesize] = 80M
+php_admin_value[post_max_size] = 80M
+php_admin_value[memory_limit] = 512M
+FPMLIMITS
+fi
+ok "PHP-FPM pool limits set (upload 80M, memory 512M)"
+
 # PHP-FPM ships with PrivateTmp=true which creates an isolated /tmp namespace
 # for the process. FreeSWITCH writes received-fax TIFFs to the real /tmp, so
 # PHP file_exists() always returns false — inbound fax processing silently fails.
@@ -1504,6 +1567,11 @@ if [[ -n "$PUBLIC_DOMAIN" ]]; then
             fi
         fi
         if [[ -f "/etc/letsencrypt/live/$PUBLIC_DOMAIN/fullchain.pem" ]]; then
+            # FusionPBX is deliberately not served at "/" (see the port 80 vhost).
+            # When the Angular CE frontend is not built yet the docroot stays the
+            # placeholder webroot, and FusionPBX is reached at /pbx instead. Before
+            # this the placeholder was empty, so port 443 answered a bare 403 with
+            # no hint that /pbx existed. Reported by @infotek on Rocky 9.
             SSL_DOCROOT=$([[ -f /usr/ictpbxx/dist/index.html ]] && echo "/usr/ictpbxx/dist" || echo "/var/www/html")
             if ! grep -q 'mod_ssl' /etc/httpd/conf.modules.d/*.conf 2>/dev/null; then
                 quiet dnf install -y mod_ssl || true
@@ -1561,6 +1629,8 @@ if [[ -n "$PUBLIC_DOMAIN" ]]; then
     ProxyPassReverse /ws/ wss://${SERVER_IP}:5067/
 
     # Phone auto-provisioning — HTTPS only (phones must use TLS for credential security)
+    # FusionPBX UI. It is not the DocumentRoot on purpose, so it needs a path.
+    Alias /pbx /var/www/fusionpbx
     Alias /provision /var/www/fusionpbx/app/provision
     <Directory /var/www/fusionpbx/app/provision>
         Options -Indexes
