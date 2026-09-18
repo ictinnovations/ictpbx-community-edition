@@ -154,7 +154,14 @@ hdr "Step 1: System packages & repos"
 info "Enabling EPEL, PowerTools / CRB..."
 quiet dnf install -y epel-release dnf-utils
 # Rocky 8 = powertools, Rocky 9 = crb
-if dnf repolist all 2>/dev/null | grep -qi 'crb'; then
+if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    OS_MAJOR_VERSION="${VERSION_ID%%.*}"
+else
+    OS_MAJOR_VERSION=$(rpm -E %rhel)
+fi
+
+if [ "${OS_MAJOR_VERSION:-0}" -ge 9 ]; then
     quiet dnf config-manager --set-enabled crb
 else
     quiet dnf config-manager --set-enabled powertools
