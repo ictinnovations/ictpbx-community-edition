@@ -2,6 +2,17 @@
 
 ICTPBX is an open-source unified communications management platform combining full-featured IP-PBX and Fax server capabilities in a single web UI. It is built on top of [ICTFax](https://www.ictfax.com) Angular Framework, [ICTCore](https://github.com/ictinnovations/ictcore) (PHP REST framework), [FusionPBX](https://www.fusionpbx.com/) (PBX configuration engine), and [FreeSWITCH](https://freeswitch.com/) (media server).
 
+> **Only want a fax server?** ICTPBX includes fax, but it also installs FusionPBX,
+> PostgreSQL and the whole PBX stack. If you do not need extensions, IVR and queues,
+> install [ICTFax](https://github.com/ictinnovations/ictfax) instead. It is a smaller
+> build with its own guide at
+> [ictfax.org/ictfax-installation-guide](https://www.ictfax.org/ictfax-installation-guide/).
+>
+> Worth knowing before you start: `ictcore-ce-install.sh` in this repository installs
+> **ICTPBX**, not ICTFax. It creates a database named `ictfax` and pulls in the fax
+> conversion tools because both products sit on ICTCore, which makes it look like the
+> fax installer when you arrive here from a search. It is not.
+
 ### PBX Features
 - SIP extension and device management
 - IVR auto-attendant with nested menus
