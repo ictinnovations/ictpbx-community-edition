@@ -281,16 +281,17 @@ name = MariaDB 10.11
 baseurl = https://downloads.mariadb.com/MariaDB/mariadb-10.11/yum/rhel/$releasever/$basearch
 gpgkey = https://downloads.mariadb.com/MariaDB/RPM-GPG-KEY-MariaDB
 gpgcheck = 1
+# EL8 keeps the MariaDB.org packages out of reach: dnf answers "All matches
+# were filtered out by modular filtering" and the install aborts, because the
+# AppStream mariadb module claims those package names. Disabling the module
+# does NOT lift it. Verified in a rockylinux:8 container, where the streams
+# read [x] and repoquery still found MariaDB-server while install kept
+# failing. module_hotfixes is the switch that does, and it is what MariaDB.org
+# ship in their own repo setup. Harmless on EL9, which never filtered here.
+# Reported by @infotek against Rocky 8.
+module_hotfixes = 1
 REPO
 
-# EL8 ships a `mariadb` AppStream module whose filters hide the MariaDB.org
-# packages entirely, so the install below fails with "All matches were
-# filtered out by modular filtering" and takes the whole run down with it.
-# Disabling the module makes the MariaDB.org repo visible again. EL9 has no
-# such module and the command is a harmless no-op there, which is what the
-# `|| true` is for — same pattern as postgresql in step 6. Reported by
-# @infotek against Rocky 8.
-quiet dnf module disable mariadb -y || true
 quiet dnf install -y MariaDB-server MariaDB-client
 quiet systemctl enable --now mariadb
 ok "MariaDB $(mariadb --version 2>&1 | awk '{print $5}' | tr -d ',') installed"
