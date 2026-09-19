@@ -376,8 +376,11 @@ hdr "Step 7: FreeSWITCH"
 # accepted (and ignored) for backward compatibility with existing call sites.
 info "Adding okay.com.mx repo (FreeSWITCH packages)..."
 # okay-release defines the [okay] repo via an RPM (handles EL release detection).
+# 1-5 has no el9 build, so on EL9 this 404d every run and fell through to the
+# repo file below, which works but makes a clean install look broken. 1-10 is
+# published for both el8 and el9 (checked, both answer 200).
 rpm -q okay-release &>/dev/null || \
-    rpm -ivh "http://repo.okay.com.mx/centos/${EL_VER}/x86_64/release/okay-release-1-5.el${EL_VER}.noarch.rpm" 2>>"$LOG" \
+    rpm -ivh "http://repo.okay.com.mx/centos/${EL_VER}/x86_64/release/okay-release-1-10.el${EL_VER}.noarch.rpm" 2>>"$LOG" \
     || cat > /etc/yum.repos.d/okay.repo <<'REPO'
 [okay]
 name=Extra OKay Packages for Enterprise Linux - $basearch
