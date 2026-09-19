@@ -63,7 +63,7 @@ ICTCore PHP REST API  (/usr/ictcore)   ← [edition] mode = community
                      FusionPBX hooks → FreeSWITCH XML reload
                               │
                               ▼
-                     FreeSWITCH 1.10.12
+                     FreeSWITCH
 ```
 
 ---
@@ -78,7 +78,7 @@ ICTCore PHP REST API  (/usr/ictcore)   ← [edition] mode = community
 | MariaDB         | 10.11.x           | Database: `ictfax`           |
 | PostgreSQL      | 16.x              | Database: `fusionpbx`        |
 | FusionPBX       | 5.5.7             | At `/var/www/fusionpbx`      |
-| FreeSWITCH      | 1.10.12           | Managed by FusionPBX         |
+| FreeSWITCH      | 1.10.12 or newer  | okay.com.mx repo; 1.11.1 as of Sep 2026 |
 | Memcached       | 1.6.x             | Port 11211 (session cache)   |
 | Node.js      | 18.x LTS (recommended)              | Frontend build only          |
 
@@ -157,7 +157,7 @@ The CE installer handles everything end-to-end:
 - MariaDB 10.11 (`ictfax` database, `ictfax` user)
 - PostgreSQL 16 (`fusionpbx` database)
 - FusionPBX 5.5.7 (`v5.5.7` tag) + local patches
-- FreeSWITCH 1.10.12
+- FreeSWITCH from the okay.com.mx repo
 - ICTCore checkout, Composer dependencies, schema load
 - JWT RS256 keypair (`ib_node`, `ib_node.pub`, `ib_node.crt`, `ib_node.pem`)
 - `ictcore.conf` generation **with `[edition] mode = community`**

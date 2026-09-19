@@ -9,7 +9,7 @@
 /* Table: recording                                             */
 /* Desc: user can upload his voice recordings here              */
 /*==============================================================*/
-CREATE TABLE recording
+CREATE TABLE IF NOT EXISTS recording
 (
    recording_id             int(11) unsigned       NOT NULL auto_increment,
    tenant_id                int(11)                NOT NULL default 0,
@@ -28,21 +28,25 @@ CREATE TABLE recording
    updated_by               int(11) unsigned       default NULL,
    PRIMARY KEY (recording_id)
 ) ENGINE = InnoDB;
-CREATE INDEX recording_created_by ON recording (created_by);
+CREATE INDEX IF NOT EXISTS recording_created_by ON recording (created_by);
 
 /*==============================================================*/
 /* Desc: Dumping Default System configurations                  */
 /*==============================================================*/
 -- service
-INSERT INTO configuration VALUES (NULL,'0','service','voice_status','0',254); --ready
+-- ready. No unique key on configuration, so guard on absence rather than
+-- relying on INSERT IGNORE, which would happily add a second row.
+INSERT INTO configuration (tenant_id, type, name, data, permission_flag)
+SELECT 0, 'service', 'voice_status', '0', 254 FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM configuration WHERE type='service' AND name='voice_status');
 
 /*==============================================================*/
 /* Table: insert voice module permissions                       */
 /*==============================================================*/
 -- Recording permissions
-INSERT INTO permission VALUES (NULL, 'recording', '');
-INSERT INTO permission VALUES (NULL, 'recording_create', '');
-INSERT INTO permission VALUES (NULL, 'recording_list', '');
-INSERT INTO permission VALUES (NULL, 'recording_read', '');
-INSERT INTO permission VALUES (NULL, 'recording_update', '');
-INSERT INTO permission VALUES (NULL, 'recording_delete', '');
+INSERT IGNORE INTO permission VALUES (NULL, 'recording', '');
+INSERT IGNORE INTO permission VALUES (NULL, 'recording_create', '');
+INSERT IGNORE INTO permission VALUES (NULL, 'recording_list', '');
+INSERT IGNORE INTO permission VALUES (NULL, 'recording_read', '');
+INSERT IGNORE INTO permission VALUES (NULL, 'recording_update', '');
+INSERT IGNORE INTO permission VALUES (NULL, 'recording_delete', '');

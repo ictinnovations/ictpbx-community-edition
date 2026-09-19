@@ -9,7 +9,7 @@
 /* Table: template                                              */
 /* Desc: this table will hold templates for email broadcasting  */
 /*==============================================================*/
-CREATE TABLE template
+CREATE TABLE IF NOT EXISTS template
 (
    template_id              int(11) unsigned       NOT NULL auto_increment,
    tenant_id                int(11)                NOT NULL default 0,
@@ -27,21 +27,25 @@ CREATE TABLE template
    updated_by               int(11) unsigned       default NULL,
    PRIMARY KEY (template_id)
 ) ENGINE = InnoDB;
-CREATE INDEX template_created_by ON template (created_by);
+CREATE INDEX IF NOT EXISTS template_created_by ON template (created_by);
 
 /*==============================================================*/
 /* Desc: Dumping Default System configurations                  */
 /*==============================================================*/
 -- service
-INSERT INTO configuration VALUES (NULL,'0','service','email_status','0',254); --ready
+-- ready. No unique key on configuration, so guard on absence rather than
+-- relying on INSERT IGNORE, which would happily add a second row.
+INSERT INTO configuration (tenant_id, type, name, data, permission_flag)
+SELECT 0, 'service', 'email_status', '0', 254 FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM configuration WHERE type='service' AND name='email_status');
 
 /*==============================================================*/
 /* Table: insert email module permissions                       */
 /*==============================================================*/
 -- Template permissions
-INSERT INTO permission VALUES (NULL, 'template', '');
-INSERT INTO permission VALUES (NULL, 'template_create', '');
-INSERT INTO permission VALUES (NULL, 'template_list', '');
-INSERT INTO permission VALUES (NULL, 'template_read', '');
-INSERT INTO permission VALUES (NULL, 'template_update', '');
-INSERT INTO permission VALUES (NULL, 'template_delete', '');
+INSERT IGNORE INTO permission VALUES (NULL, 'template', '');
+INSERT IGNORE INTO permission VALUES (NULL, 'template_create', '');
+INSERT IGNORE INTO permission VALUES (NULL, 'template_list', '');
+INSERT IGNORE INTO permission VALUES (NULL, 'template_read', '');
+INSERT IGNORE INTO permission VALUES (NULL, 'template_update', '');
+INSERT IGNORE INTO permission VALUES (NULL, 'template_delete', '');

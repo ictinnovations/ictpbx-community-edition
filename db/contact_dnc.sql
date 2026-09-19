@@ -2,7 +2,7 @@
 /* Table: contact_dnc                                               */
 /* Desc: user can upload contact_dnc lists here                     */
 /*==================================================================*/
-CREATE TABLE contact_dnc
+CREATE TABLE IF NOT EXISTS contact_dnc
 (
    contact_dnc_id                int(11) unsigned       NOT NULL auto_increment,
    tenant_id                     int(11) unsigned       NOT NULL,

@@ -9,7 +9,7 @@
 /* Table: document                                              */
 /* Desc: this table will hold documents for fax broadcasting    */
 /*==============================================================*/
-CREATE TABLE document
+CREATE TABLE IF NOT EXISTS document
 (
    document_id              int(11) unsigned       NOT NULL auto_increment,
    tenant_id                int(11)                NOT NULL default 0,
@@ -32,22 +32,26 @@ CREATE TABLE document
    updated_by               int(11) unsigned       default NULL,
    PRIMARY KEY (document_id)
 ) ENGINE = InnoDB;
-CREATE INDEX document_created_by ON document (created_by);
-CREATE INDEX document_tenant_id ON document (tenant_id);
+CREATE INDEX IF NOT EXISTS document_created_by ON document (created_by);
+CREATE INDEX IF NOT EXISTS document_tenant_id ON document (tenant_id);
 
 /*==============================================================*/
 /* Desc: Dumping Default System configurations                  */
 /*==============================================================*/
 -- service
-INSERT INTO configuration VALUES (NULL,'0','service','fax_status','0',254); --ready
+-- ready. No unique key on configuration, so guard on absence rather than
+-- relying on INSERT IGNORE, which would happily add a second row.
+INSERT INTO configuration (tenant_id, type, name, data, permission_flag)
+SELECT 0, 'service', 'fax_status', '0', 254 FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM configuration WHERE type='service' AND name='fax_status');
 
 /*==============================================================*/
 /* Table: insert fax module permissions                         */
 /*==============================================================*/
 -- Document permissions
-INSERT INTO permission VALUES (NULL, 'document', '');
-INSERT INTO permission VALUES (NULL, 'document_create', '');
-INSERT INTO permission VALUES (NULL, 'document_list', '');
-INSERT INTO permission VALUES (NULL, 'document_read', '');
-INSERT INTO permission VALUES (NULL, 'document_update', '');
-INSERT INTO permission VALUES (NULL, 'document_delete', '');
+INSERT IGNORE INTO permission VALUES (NULL, 'document', '');
+INSERT IGNORE INTO permission VALUES (NULL, 'document_create', '');
+INSERT IGNORE INTO permission VALUES (NULL, 'document_list', '');
+INSERT IGNORE INTO permission VALUES (NULL, 'document_read', '');
+INSERT IGNORE INTO permission VALUES (NULL, 'document_update', '');
+INSERT IGNORE INTO permission VALUES (NULL, 'document_delete', '');

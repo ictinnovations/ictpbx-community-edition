@@ -141,7 +141,16 @@ INSERT INTO permission VALUES (NULL, 'tenant_read', '');
 INSERT INTO permission VALUES (NULL, 'tenant_update', '');
 INSERT INTO permission VALUES (NULL, 'tenant_delete', '');
 INSERT INTO permission VALUES (NULL, 'announcement', '');
-INSERT INTO configuration_data 
+-- Seeds nothing at this point in the file: the configuration rows it selects
+-- from are inserted much further down, mirroring the section order of
+-- database.sql. Conf.php LEFT JOINs configuration_data and writes a row on
+-- first save, so an empty table is the normal state and not a fault. Kept
+-- here, and kept complete, because the truncated version of this statement
+-- used to abort the whole file and cost 726 later rows.
+INSERT INTO configuration_data
+(configuration_id, class, node_id, campaign_id, data, date_created, created_by, last_updated, updated_by)
+SELECT configuration_id, 1 AS class, 0 AS node_id, NULL, data, UNIX_TIMESTAMP(), 0, NULL, NULL
+FROM configuration;
 INSERT INTO gateway VALUES (1, 'Asterisk', 3, 0); -- voice and fax
 INSERT INTO gateway VALUES (2, 'Kannel', 4, 1); -- sms
 INSERT INTO gateway VALUES (4, 'Sendmail', 8, 1); -- email

@@ -1,5 +1,5 @@
 -- Tenant Table
-CREATE TABLE tenant
+CREATE TABLE IF NOT EXISTS tenant
 (
     tenant_id         int(11) unsigned       NOT NULL auto_increment, 
     first_name        varchar(128)           NOT NULL,
@@ -26,7 +26,7 @@ CREATE TABLE tenant
 /*==============================================================*/
 /* Table: tenant_permission                                       */
 /*==============================================================*/
-CREATE TABLE tenant_permission
+CREATE TABLE IF NOT EXISTS tenant_permission
 (
    tenant_permission_id           int(11) unsigned       NOT NULL auto_increment,
    tenant_id                      int(11) unsigned       NOT NULL default '0',
@@ -38,4 +38,4 @@ CREATE TABLE tenant_permission
 
 -- Tenant permissions
 
-ALTER TABLE tenant ADD CONSTRAINT email UNIQUE (email);
+ALTER TABLE tenant ADD UNIQUE KEY IF NOT EXISTS email (email);

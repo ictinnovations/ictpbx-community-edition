@@ -13,11 +13,11 @@
 /*==============================================================*/
 
 
-CREATE TABLE login_attempts 
+CREATE TABLE IF NOT EXISTS login_attempts 
 (   
    login_attempts_id                             INT(11)                NOT NULL AUTO_INCREMENT,
    user_id                        INT(6)                 DEFAULT NULL,
    attempts                       int(11)                NOT NULL default 0,
    ip_address                     VARCHAR(255)           DEFAULT NULL,
-   PRIMARY KEY (id)
+   PRIMARY KEY (login_attempts_id)
 ) ENGINE=InnoDB;

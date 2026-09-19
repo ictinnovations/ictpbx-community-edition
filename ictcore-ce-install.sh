@@ -3,7 +3,7 @@
 # Supported distros: Rocky Linux 8.x / 9.x  ·  CentOS Stream 8 / 9
 #                    (EL8 path uses powertools repo, EL9 path uses crb)
 # Installs: MariaDB, PostgreSQL, PHP 8.3, Apache, Memcached,
-#           FreeSWITCH 1.10.12, FusionPBX 5.5.7, ICTCore backend (CE mode)
+#           FreeSWITCH (okay.com.mx), FusionPBX 5.5.7, ICTCore backend (CE mode)
 # Run as root on a fresh node.
 # Usage: bash /usr/ictcore/ictcore-ce-install.sh
 set -euo pipefail
@@ -20,7 +20,7 @@ APACHE_CONF=/etc/httpd/conf.d/ictpbx.conf
 LOG=/tmp/ictcore-ce-install.log
 ICTCORE_REPO=https://github.com/ictinnovations/ictpbx-community-edition.git
 # Release tag to install. Inherited from install-ce.sh; override for a pin/rollback.
-RELEASE_TAG="${RELEASE_TAG:-v1.2.0}"
+RELEASE_TAG="${RELEASE_TAG:-v1.2.1}"
 FUSIONPBX_REPO=https://github.com/fusionpbx/fusionpbx.git
 FUSIONPBX_TAG=5.5.7
 
@@ -283,6 +283,14 @@ gpgkey = https://downloads.mariadb.com/MariaDB/RPM-GPG-KEY-MariaDB
 gpgcheck = 1
 REPO
 
+# EL8 ships a `mariadb` AppStream module whose filters hide the MariaDB.org
+# packages entirely, so the install below fails with "All matches were
+# filtered out by modular filtering" and takes the whole run down with it.
+# Disabling the module makes the MariaDB.org repo visible again. EL9 has no
+# such module and the command is a harmless no-op there, which is what the
+# `|| true` is for — same pattern as postgresql in step 6. Reported by
+# @infotek against Rocky 8.
+quiet dnf module disable mariadb -y || true
 quiet dnf install -y MariaDB-server MariaDB-client
 quiet systemctl enable --now mariadb
 ok "MariaDB $(mariadb --version 2>&1 | awk '{print $5}' | tr -d ',') installed"
@@ -353,14 +361,17 @@ fi
 ok "PostgreSQL database 'fusionpbx' ready"
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# STEP 7 — FreeSWITCH 1.10.12
+# STEP 7 — FreeSWITCH (okay.com.mx packages)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-hdr "Step 7: FreeSWITCH 1.10.12"
+hdr "Step 7: FreeSWITCH"
 
 # Finding #3 — SignalWire's auth-gated repo URL the installer used previously
 # (https://freeswitch.signalwire.com/repo/rpm/release/$basearch/) returns 404
-# regardless of PAT. The okay.com.mx community repo ships the same 1.10.12 RPMs
-# and does not require auth. SIGNALWIRE_TOKEN is no longer required but is
+# regardless of PAT. The okay.com.mx community repo carries the same packages
+# and does not require auth. It tracks upstream rather than holding a version,
+# so what lands is whatever it currently ships: 1.10.12 when this was written,
+# 1.11.1 by September 2026. The installed version is printed at the end of this
+# step rather than asserted here. SIGNALWIRE_TOKEN is no longer required but is
 # accepted (and ignored) for backward compatibility with existing call sites.
 info "Adding okay.com.mx repo (FreeSWITCH packages)..."
 # okay-release defines the [okay] repo via an RPM (handles EL release detection).
