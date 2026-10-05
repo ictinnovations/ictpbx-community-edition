@@ -44,7 +44,9 @@ class PermissionApi extends Api
   public function list_view($query = array())
   {
     $this->_authorize('permission_list');
-    return Permission::search((array)$query);
+    $filter = (array)$query;
+    unset($filter['query']); // raw SQL subquery, internal callers only
+    return Permission::search($filter);
   }
 
   // no further api needed to update or delete permissions

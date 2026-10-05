@@ -7,7 +7,7 @@
 -- Auth model: the caller is already SIP-registered to their extension, so we trust the
 -- calling extension as identity instead of prompting for a keypad PIN (softphone DTMF is
 -- unreliable). We pass the extension to the gateway, which calls ICTCore /voice_identity to
--- mint a TENANT-scoped JWT for that extension's tenant. No DTMF is collected.
+-- mint a JWT for the user that extension is assigned to (tenant admin if unassigned).
 --
 -- Flow: answer -> start mod_audio_stream capturing the caller's audio to the gateway
 -- (ws://127.0.0.1:8790) with {uuid, extension} metadata -> the gateway authenticates by
@@ -21,22 +21,23 @@ local RATE    = "16k"    -- must match the gateway voice.sample_rate
 session:answer()
 session:sleep(500)
 
--- Identity = the caller's registered extension. sip_from_user is the registration username
--- (the extension); fall back to the caller-id number.
-local extension = session:getVariable("sip_from_user")
-if not extension or #extension == 0 then
-  extension = session:getVariable("caller_id_number")
-end
-if not extension or #extension == 0 then
-  session:hangup("NORMAL_CLEARING")
+-- Identity = the directory user the INVITE authenticated as (auth-calls). user_name and
+-- domain_name are set by FreeSWITCH from that user; sip_from_user / caller_id_number are
+-- whatever the caller chose to send and must not decide whose token is minted.
+local extension = session:getVariable("user_name")
+local domain = session:getVariable("domain_name")
+if not extension or #extension == 0 or not domain or #domain == 0 then
+  freeswitch.consoleLog("WARNING", "*99: no authenticated user/domain on this leg, refusing\n")
+  session:hangup("CALL_REJECTED")
   return
 end
 extension = extension:gsub("[^0-9A-Za-z]", "")
+domain = domain:gsub("[^0-9A-Za-z._-]", "")
 
 local uuid = session:get_uuid()
 
 -- Compact, space-free JSON. Sent as the first WS text frame.
-local meta = string.format('{"uuid":"%s","extension":"%s"}', uuid, extension)
+local meta = string.format('{"uuid":"%s","extension":"%s","domain":"%s"}', uuid, extension, domain)
 
 local api = freeswitch.API()
 api:execute("uuid_audio_stream", uuid .. " start " .. GW_WS .. " " .. MIXTYPE .. " " .. RATE .. " " .. meta)

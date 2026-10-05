@@ -158,26 +158,27 @@ class Activity
     $pageIndex = isset($aFilter['pageIndex']) ? (int)$aFilter['pageIndex'] : 0;
     $pageSize = isset($aFilter['pageSize']) ? (int)$aFilter['pageSize'] : 0;
     $aWhere = array();
+    $esc = function ($v) { return mysqli_real_escape_string(DB::$link, $v); };
     foreach ($aFilter as $search_field => $search_value) {
       switch ($search_field) {
         case 'activitylog_id':
-          $aWhere[] = "a.activitylog_id = $search_value";
+          $aWhere[] = "a.activitylog_id = " . (int)$search_value;
           break;
         case 'tenant_id':
-          $aWhere[] = "a.tenant_id = '$search_value'";
+          $aWhere[] = "a.tenant_id = " . (int)$search_value;
           break;
         case 'user_id':
-          $aWhere[] = "a.user_id = '$search_value'";
+          $aWhere[] = "a.user_id = " . (int)$search_value;
           break;
         case 'activities':
         case 'username':
-          $aWhere[] = "$search_field LIKE '%$search_value'";
+          $aWhere[] = "$search_field LIKE '%" . $esc($search_value) . "'";
           break;
         case 'to':
-          $aWhere[] = "a.date <= $search_value";
+          $aWhere[] = "a.date <= " . (int)$search_value;
           break;
         case 'from':
-          $aWhere[] = "a.date >= $search_value";
+          $aWhere[] = "a.date >= " . (int)$search_value;
           break;
         case ($pageIndex > 0 && $pageSize > 0):
           $offset = ($pageIndex - 1) * $pageSize;

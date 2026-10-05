@@ -124,6 +124,24 @@ class InboundRoute
     $normalized = ltrim($this->destination_number, '+');
     $this->destination_number_regex = '^\+?' . preg_quote($normalized, '/') . '$';
 
+    // One route per number: routes are filed as public/<number>.xml, so a second row for
+    // the same number overwrites the first's file, and deleting either kills both.
+    $dup = $pdo->prepare(
+      "SELECT 1 FROM v_destinations
+        WHERE ltrim(destination_number, '+') = :num AND destination_uuid::text <> :uuid LIMIT 1");
+    $dup->execute(['num' => $normalized, 'uuid' => (string)$this->destination_uuid]);
+    if ($dup->fetchColumn()) {
+      throw new CoreException(409, "An inbound route for {$this->destination_number} already exists.");
+    }
+
+    // A renumbered route leaves its old file behind unless it is removed explicitly.
+    $old_number = null;
+    if (!empty($this->destination_uuid)) {
+      $prev = $pdo->prepare("SELECT destination_number FROM v_destinations WHERE destination_uuid = :uuid");
+      $prev->execute(['uuid' => $this->destination_uuid]);
+      $old_number = $prev->fetchColumn() ?: null;
+    }
+
     // Generate UUIDs
     if (empty($this->destination_uuid)) {
       $this->destination_uuid = $this->generate_uuid();
@@ -232,6 +250,18 @@ class InboundRoute
       $domain_name
     );
     $this->sync_fs_dialplan($static_xml);
+
+    if ($old_number !== null) {
+      $safe_old = preg_replace('/[^a-zA-Z0-9_\-]/', '_', (string)$old_number);
+      $safe_new = preg_replace('/[^a-zA-Z0-9_\-]/', '_', (string)$this->destination_number);
+      $old_file = '/usr/ictcore/etc/freeswitch/dialplan/public/' . $safe_old . '.xml';
+      if ($safe_old !== $safe_new && is_file($old_file)) {
+        @unlink($old_file);
+        Corelog::log("Inbound route XML removed after renumber: $old_file", Corelog::CRUD);
+        @touch('/etc/freeswitch/dialplan/ictcore.xml');
+        \ICT\Core\Realtime::run_cmd('reloadxml');
+      }
+    }
 
     return $this->destination_uuid;
   }

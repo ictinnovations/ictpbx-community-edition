@@ -25,29 +25,30 @@ class Core
     $where_str = '1=1';
     $where_str_account = '';
     $where_str_service = '';
+    $esc = function ($v) { return mysqli_real_escape_string(DB::$link, $v); };
     foreach ($aFilter as $search_field => $search_value) {
       switch($search_field) {
         case 'date_created':
         case 'since':
         case 'from':
-          $aWhere[] = "t.date_created >= '$search_value'";
+          $aWhere[] = "t.date_created >= '" . $esc($search_value) . "'";
           break;
         case 'tenant_id':
-            $aWhere[] = "t.tenant_id = '$search_value'";
+            $aWhere[] = "t.tenant_id = " . (int)$search_value;
             $tenant = true;
             break;
         case 'user_id':
-          $aWhere[] = "t.usr_id = '$search_value'";
+          $aWhere[] = "t.usr_id = " . (int)$search_value;
           $user = true;
           break;          
         case 'created_by':
-          $aWhere[] = "t.$search_field = '$search_value'";
+          $aWhere[] = "t.$search_field = " . (int)$search_value;
           break;
         case 'service_flag':
-          $where_str_service = " AND t.service_flag='$search_value'";
+          $where_str_service = " AND t.service_flag=" . (int)$search_value;
           break;
         case 'account_type':
-          $where_str_account = " AND t.type='$search_value'";
+          $where_str_account = " AND t.type='" . $esc($search_value) . "'";
           break;
       }
     }

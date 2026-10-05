@@ -284,7 +284,7 @@ class CallQueue
       $e        = fn($s) => htmlspecialchars((string)$s, ENT_XML1, 'UTF-8');
       $ext      = $e($this->queue_extension ?? '');
       $nm       = $e($this->queue_name ?? 'queue_' . $this->call_center_queue_uuid);
-      $domain   = FpbxDomain::get_domain_name($this->domain_uuid) ?: 'localhost';
+      $domain   = FpbxDomain::get_domain_name($this->domain_uuid); // 'default' when the domain is gone -- sync_callcenter_conf() must use the same fallback
       $q_data   = $e($this->queue_name . '@' . $domain);
 
       $xml  = '<?xml version="1.0" encoding="utf-8"?>' . "\n<include>\n";
@@ -313,7 +313,7 @@ class CallQueue
     }
   }
 
-  private function sync_callcenter_conf($pdo)
+  public static function sync_callcenter_conf($pdo)
   {
     $conf_file = '/etc/freeswitch/autoload_configs/callcenter.conf.xml';
 
@@ -343,7 +343,7 @@ class CallQueue
     $xml .= "\t<queues>\n";
 
     foreach ($queues as $q) {
-      $domain   = $q['domain_name'] ?: 'localhost';
+      $domain   = $q['domain_name'] ?: 'default';
       $q_name   = $e($q['queue_name'] . '@' . $domain);
       $strategy = $e($q['queue_strategy'] ?? 'ring-all');
       $moh      = $e($q['queue_moh_sound'] ?? 'local_stream://moh');
@@ -406,7 +406,7 @@ class CallQueue
       $q_domain = '';
       foreach ($queues as $q) {
         if ($q['call_center_queue_uuid'] === $t['call_center_queue_uuid']) {
-          $q_domain = '@' . ($q['domain_name'] ?: 'localhost');
+          $q_domain = '@' . ($q['domain_name'] ?: 'default');
           break;
         }
       }

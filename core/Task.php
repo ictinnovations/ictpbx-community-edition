@@ -103,18 +103,19 @@ class Task
     $aTask = array();
     $from_str = self::$table;
     $aWhere = array();
+    $esc = function ($v) { return mysqli_real_escape_string(DB::$link, $v); };
     foreach ($aFilter as $search_field => $search_value) {
       switch ($search_field) {
         case 'task_id':
         case 'account_id':
-          $aWhere[] = "$search_field = $search_value";
+          $aWhere[] = "$search_field = " . (int)$search_value;
           break;
         case 'data':
-          $aWhere[] = "data = '" . json_encode($search_value, JSON_NUMERIC_CHECK) . "'";
+          $aWhere[] = "data = '" . $esc(json_encode($search_value, JSON_NUMERIC_CHECK)) . "'";
           break;
         case 'type':
         case 'action':
-          $aWhere[] = "$search_field = '$search_value'";
+          $aWhere[] = "$search_field = '" . $esc($search_value) . "'";
           break;
       }
     }

@@ -198,6 +198,7 @@ class Document extends Message
     $totalrows = null;
     $from_str = self::$table . " as d";
     $aWhere = array();
+    $esc = function ($v) { return mysqli_real_escape_string(DB::$link, $v); };
     $limitSql = '';
     $pageIndex = isset($aFilter['pageIndex']) ? (int)$aFilter['pageIndex'] : 0;
     $pageSize = isset($aFilter['pageSize']) ? (int)$aFilter['pageSize'] : 0;
@@ -205,30 +206,30 @@ class Document extends Message
       switch ($search_field) {
         case 'document_id':
         case 'tenant_id':
-          $aWhere[] = "d.$search_field = $search_value";
+          $aWhere[] = "d.$search_field = " . (int)$search_value;
           break;
         case 'name':
         case 'type':
         case 'description':
-          $aWhere[] = "d.$search_field LIKE '%$search_value%'";
+          $aWhere[] = "d.$search_field LIKE '%" . $esc($search_value) . "%'";
           break;
 
         case 'user_id':
         case 'created_by':
-          $aWhere[] = "d.created_by = '$search_value'";
+          $aWhere[] = "d.created_by = " . (int)$search_value;
           break;
         case 'totalrows':
           $totalrows = 1;
           break;
         case 'before':
-          $aWhere[] = "d.date_created <= $search_value";
+          $aWhere[] = "d.date_created <= " . (int)$search_value;
           break;
         case 'after':
-          $aWhere[] = "d.date_created >= $search_value";
+          $aWhere[] = "d.date_created >= " . (int)$search_value;
           break;
         case 'email':
         case 'username':
-          $aWhere[] = "u.$search_field = '$search_value'";
+          $aWhere[] = "u.$search_field = '" . $esc($search_value) . "'";
           $from_str .= ' LEFT JOIN usr u ON d.created_by=u.usr_id';
           break;
         case ($pageIndex > 0 && $pageSize > 0):

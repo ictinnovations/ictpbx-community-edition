@@ -53,3 +53,6 @@ etc/freeswitch/directory/fpbx_extensions/*.xml
 
 # Secret key, never commit
 etc/voice_gateway.key
+
+# Tenant-uploaded branding logos (runtime data)
+data/logo/logo_*.png

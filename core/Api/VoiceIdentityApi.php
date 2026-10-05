@@ -15,11 +15,13 @@ class VoiceIdentityApi extends Api
   /**
    * Resolve a SIP extension to a tenant-scoped JWT for the AI voice gateway (*99).
    *
-   * The caller is already SIP-registered to the extension, so we authenticate by the
-   * calling extension rather than by a typed password: extension -> FusionPBX domain ->
-   * tenant -> that tenant's admin user (role_id=3) -> scoped JWT via generate_token().
-   * Tenants with no role_id=3 user (e.g. the Super Admin domain) are refused, so a *99
-   * call can never escalate to super-admin scope. Guarded by a shared secret in the
+   * The caller already authenticated as the extension over SIP, so we trust it instead of
+   * a typed password: extension@domain -> tenant -> the user the extension is assigned to
+   * (account.created_by, set by "Assign to User"), or the tenant admin (role_id=3) when
+   * it is unassigned -> scoped JWT via generate_token(). The domain is required because
+   * extension numbers are only unique within a tenant. A resolved user outside the
+   * tenant, or a tenant with no role_id=3 user (e.g. the Super Admin domain), is refused,
+   * so a *99 call can never escalate to super-admin scope. Guarded by a shared secret in the
    * X-Voice-Gateway-Key header (NOT a user JWT); the endpoint is reached only from the
    * loopback gateway sidecar.
    *
@@ -42,11 +44,26 @@ class VoiceIdentityApi extends Api
       throw new CoreException(400, 'extension required');
     }
 
-    // extension -> FusionPBX domain_uuid (PostgreSQL)
+    $domain = isset($data['domain'])
+      ? preg_replace('/[^0-9A-Za-z._-]/', '', (string) $data['domain']) : '';
+
+    // extension@domain -> FusionPBX domain_uuid (PostgreSQL). Without a domain the number
+    // is only accepted when exactly one tenant has it; otherwise we would be guessing.
     $pdo = FpbxDomain::fpbx_db();
-    $stmt = $pdo->prepare('SELECT domain_uuid FROM v_extensions WHERE extension = ? LIMIT 1');
-    $stmt->execute(array($extension));
-    $domain_uuid = $stmt->fetchColumn();
+    if ($domain !== '') {
+      $stmt = $pdo->prepare('SELECT DISTINCT e.domain_uuid FROM v_extensions e
+                               JOIN v_domains d ON d.domain_uuid = e.domain_uuid
+                              WHERE e.extension = ? AND d.domain_name = ?');
+      $stmt->execute(array($extension, $domain));
+    } else {
+      $stmt = $pdo->prepare('SELECT DISTINCT domain_uuid FROM v_extensions WHERE extension = ?');
+      $stmt->execute(array($extension));
+    }
+    $matches = $stmt->fetchAll(\PDO::FETCH_COLUMN);
+    if (count($matches) > 1) {
+      throw new CoreException(409, 'Extension exists in several tenants; domain required');
+    }
+    $domain_uuid = $matches ? $matches[0] : '';
     if (empty($domain_uuid) || !preg_match('/^[0-9a-fA-F-]{36}$/', $domain_uuid)) {
       throw new CoreException(404, 'Extension not found');
     }
@@ -60,10 +77,23 @@ class VoiceIdentityApi extends Api
     }
     $tenant_id = (int) $trow['tenant_id'];
 
-    // tenant admin (role_id=3); refuse if none -> caps super-admin-only domains
+    // The extension's own user, so the assistant acts with that person's permissions.
+    // Admins (role_id=2) are excluded: a *99 call must never carry super-admin scope.
+    $ext_esc = mysqli_real_escape_string(DB::$link, $extension);
     $result = DB::query('usr',
-      "SELECT usr_id FROM usr WHERE tenant_id = $tenant_id AND role_id = 3 AND active = 1 ORDER BY usr_id ASC LIMIT 1");
+      "SELECT u.usr_id FROM account a JOIN usr u ON u.usr_id = a.created_by
+        WHERE a.phone = '$ext_esc' AND a.tenant_id = $tenant_id
+          AND a.type IN ('account','child_account')
+          AND u.tenant_id = $tenant_id AND u.active = 1 AND u.role_id <> 2
+        LIMIT 1");
     $urow = $result ? mysqli_fetch_assoc($result) : null;
+
+    // Unassigned extension: fall back to the tenant admin; refuse if none.
+    if (empty($urow['usr_id'])) {
+      $result = DB::query('usr',
+        "SELECT usr_id FROM usr WHERE tenant_id = $tenant_id AND role_id = 3 AND active = 1 ORDER BY usr_id ASC LIMIT 1");
+      $urow = $result ? mysqli_fetch_assoc($result) : null;
+    }
     if (empty($urow['usr_id'])) {
       throw new CoreException(403, 'This extension is not enabled for the assistant');
     }

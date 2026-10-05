@@ -56,7 +56,7 @@ class FpbxDomain
   public static function get_domain_uuid($tenant_id = null)
   {
     if (!empty($tenant_id)) {
-      $query = "SELECT fpbx_domain_uuid FROM tenant WHERE tenant_id = '$tenant_id'";
+      $query = "SELECT fpbx_domain_uuid FROM tenant WHERE tenant_id = " . (int)$tenant_id;
       $result = DB::query('tenant', $query);
       $row = mysqli_fetch_assoc($result);
       if (!empty($row['fpbx_domain_uuid'])) {

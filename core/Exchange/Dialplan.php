@@ -127,21 +127,22 @@ class Dialplan
     $listDialplan = array();
     $from_str = self::$table;
     $aWhere = array();
+    $esc = function ($v) { return mysqli_real_escape_string(DB::$link, $v); };
     foreach ($aFilter as $search_field => $search_value) {
       switch ($search_field) {
         case 'program_id':
         case 'application_id':
         case 'weight':
-          $aWhere[] = "$search_field = '$search_value'";
+          $aWhere[] = "$search_field = " . (int)$search_value;
           break;
         case 'gateway_flag':
         case 'filter_flag':
-          $aWhere[] = "($search_field & $search_value) = $search_value";
+          $aWhere[] = "($search_field & " . (int)$search_value . ") = " . (int)$search_value;
           break;
         case 'source':
         case 'destination':
         case 'context':
-          $aWhere[] = "'$search_value' LIKE $search_field";
+          $aWhere[] = "'" . $esc($search_value) . "' LIKE $search_field";
           break;
       }
     }

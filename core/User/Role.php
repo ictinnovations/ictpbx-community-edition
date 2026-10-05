@@ -57,13 +57,14 @@ class Role
     $aRole = array();
     $from_str = self::$table;
     $aWhere = array();
+    $esc = function ($v) { return mysqli_real_escape_string(DB::$link, $v); };
     foreach ($aFilter as $search_field => $search_value) {
       switch ($search_field) {
         case 'role_id':
-          $aWhere[] = "role_id = $search_value";
+          $aWhere[] = "role_id = " . (int)$search_value;
           break;
         case 'name':
-          $aWhere[] = "name LIKE '$search_value%'";
+          $aWhere[] = "name LIKE '" . $esc($search_value) . "%'";
           break;
         case 'query':
           $aWhere[] = "role_id IN ($search_value)";
