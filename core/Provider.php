@@ -550,6 +550,21 @@ class Provider
       }
       file_put_contents($file, $xml);
       Corelog::log("Gateway XML written: $file", Corelog::CRUD);
+
+      // rescan skips a gateway that is already loaded ("Ignoring duplicate gateway"), so
+      // an edited trunk kept its old credentials until FreeSWITCH restarted. Unload it
+      // first; the rescan below then loads the new definition.
+      try {
+        if (class_exists('\\ICT\\Core\\Realtime')) {
+          $live = \ICT\Core\Realtime::run_cmd('sofia status gateway ictcore::' . $safe);
+          if (stripos((string)$live, 'Invalid Gateway') === false) {
+            \ICT\Core\Realtime::run_cmd('sofia profile ictcore killgw ' . $safe);
+            usleep(500000); // killgw is asynchronous; give the profile time to drop it
+          }
+        }
+      } catch (\Throwable $e) {
+        Corelog::log("sofia killgw before reload failed: " . $e->getMessage(), Corelog::WARNING);
+      }
     }
 
     try {
