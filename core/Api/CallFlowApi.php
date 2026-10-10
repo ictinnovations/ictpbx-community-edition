@@ -60,6 +60,23 @@ class CallFlowApi extends Api
     throw new CoreException(417, 'Call Flow update failed');
   }
 
+  /**
+   * Flip the flow between Open (Day) and Closed (Night). Called by the feature-code
+   * script (call_flow_toggle.lua) and usable from the API. Body: {"pin": "1234"} when the
+   * flow has a PIN.
+   *
+   * @url POST /call_flows/$call_flow_uuid/toggle
+   */
+  public function toggle($call_flow_uuid, $data = array())
+  {
+    $this->_authorize_pbx('call_flows', true);
+    $o = new CallFlow($call_flow_uuid);
+    $this->_assert_pbx_domain($o);
+    $data = (array)$data;
+    $status = $o->toggle(isset($data['pin']) ? $data['pin'] : null);
+    return array('call_flow_uuid' => $call_flow_uuid, 'call_flow_status' => $status);
+  }
+
   /** @url DELETE /call_flows/$call_flow_uuid */
   public function remove($call_flow_uuid)
   {

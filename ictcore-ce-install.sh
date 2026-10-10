@@ -628,13 +628,13 @@ fs_cli -p "$ESL_PASS" -x 'sofia profile webrtc start' >/dev/null 2>&1 || true
 # Open required ports — only if firewalld is actually running.
 # On cloud images without firewalld, port management is upstream (panel).
 if systemctl is-active --quiet firewalld; then
-    for PORT in "5060/udp" "5060/tcp" "7443/tcp" "16384-32768/udp"; do
+    for PORT in "5080/udp" "5080/tcp" "16384-32768/udp"; do
         firewall-cmd --permanent --add-port="$PORT" >/dev/null
     done
     firewall-cmd --reload >/dev/null
-    ok "FreeSWITCH ports opened: 5060 (SIP), 7443 (WSS), 16384-32768 (RTP). Port 5066 proxied via Apache — not opened externally."
+    ok "FreeSWITCH ports opened: 5080 udp+tcp (SIP), 16384-32768 (RTP). There is no 5060 listener; browser WSS goes through Apache on 443."
 else
-    warn "firewalld not running — open SIP (5060), WSS (7443), RTP (16384-32768) in your cloud panel. Port 5066 is internal (Apache proxy)."
+    warn "firewalld not running — open SIP 5080 (udp+tcp) and RTP 16384-32768 (udp) in your cloud panel. Ports 5066/5067 are internal (Apache /ws/ proxy on 443)."
 fi
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1123,8 +1123,8 @@ url   = ${WEBSITE_URL}
 
 [provisioning]
 host = ${WEBSITE_HOST}
-port = 5060
-wss  = 7443
+port = 5080
+wss  = 443
 
 [security]
 hash_type    = RS256

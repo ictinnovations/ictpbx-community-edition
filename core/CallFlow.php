@@ -73,7 +73,10 @@ class CallFlow
 
   public function save()
   {
-    $domain_uuid       = FpbxDomain::get_domain_uuid($this->tenant_id);
+    // tenant_id is not a v_call_flows column, so a loaded flow has none; resolving from it
+    // fell back to the first domain and moved a sub-tenant's flow into the admin domain.
+    $domain_uuid       = !empty($this->domain_uuid) ? $this->domain_uuid
+                                                    : FpbxDomain::get_domain_uuid($this->tenant_id);
     if ($domain_uuid === null) { /* null-domain-guard */
       throw new \ICT\Core\CoreException(409, 'No FusionPBX domain assigned to this tenant. Contact an administrator.');
     }
@@ -235,6 +238,27 @@ class CallFlow
     ]);
   }
 
+  /**
+   * Flip between the Open (Day) and Closed (Night) destination, as dialling the flow's
+   * feature code does. Only the status changes, so the rest of the record is untouched.
+   *
+   * @return string 'true' (open) or 'false' (closed) after the flip
+   */
+  public function toggle($pin = null)
+  {
+    if (!empty($this->call_flow_pin_number)
+        && !hash_equals((string)$this->call_flow_pin_number, (string)$pin)) {
+      throw new CoreException(403, 'Invalid call flow PIN');
+    }
+    $open = ($this->call_flow_status === 'true' || $this->call_flow_status === true);
+    $this->call_flow_status = $open ? 'false' : 'true';
+    FpbxDomain::fpbx_db()
+      ->prepare("UPDATE v_call_flows SET call_flow_status = ? WHERE call_flow_uuid = ?")
+      ->execute([$this->call_flow_status, $this->call_flow_uuid]);
+    $this->sync_fs_dialplan();
+    return $this->call_flow_status;
+  }
+
   private function get_domain_name($pdo, $domain_uuid)
   {
     $stmt = $pdo->prepare("SELECT domain_name FROM v_domains WHERE domain_uuid = ?");
@@ -318,7 +342,24 @@ class CallFlow
       } else {
         $xml .= "      <action application=\"hangup\"/>\n";
       }
-      $xml .= "    </condition>\n  </extension>\n</include>\n";
+      $xml .= "    </condition>\n  </extension>\n";
+
+      // The feature code toggles the flow. The v_dialplans row written for it is never
+      // executed (static XML only), so the toggle has to live here. It is scoped to the
+      // owning tenant's SIP domain, so another tenant using the same code can't flip it.
+      $enabled = !($this->call_flow_enabled === 'false' || $this->call_flow_enabled === false);
+      $domain  = !empty($this->domain_uuid) ? FpbxDomain::get_domain_name($this->domain_uuid) : '';
+      if ($enabled && !empty($this->call_flow_feature_code) && $domain !== '' && $domain !== 'default') {
+        $code = $e(preg_quote((string)$this->call_flow_feature_code, '/'));
+        $dom  = $e(preg_quote($domain, '/'));
+        $pin  = empty($this->call_flow_pin_number) ? '0' : '1';
+        $xml .= "  <extension name=\"{$nm}_toggle\" continue=\"false\">\n";
+        $xml .= "    <condition field=\"\${domain_name}\" expression=\"^{$dom}\$\"/>\n";
+        $xml .= "    <condition field=\"destination_number\" expression=\"^{$code}\$\">\n";
+        $xml .= "      <action application=\"lua\" data=\"/usr/ictcore/bin/freeswitch/call_flow_toggle.lua {$uuid} {$pin}\"/>\n";
+        $xml .= "    </condition>\n  </extension>\n";
+      }
+      $xml .= "</include>\n";
 
       file_put_contents($dp_file, $xml);
     }
