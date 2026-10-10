@@ -1,0 +1,27 @@
+{
+  "application_id": "{{ application.application_id }}",
+  "input": {
+    "fax_enable_t38_request": "false",
+    "fax_enable_t38": "false",
+    "fax_local_station_id": "ICTCore",
+    "fax_file": "{{ application.fax_file }}",
+    "application_result": "failed",
+    "execute_on_fax_success": "set application_result=success"
+  },
+  "output": {
+    "error": "fax_result_text",
+    "pages": "fax_document_total_pages",
+    "fax_file": "fax_file",
+    "result": "application_result"
+  },
+  "batch": [
+    {
+      "name": "playback",
+      "data": "silence_stream://1000"
+    },
+    {
+      "name": "rxfax",
+      "data": "{{ application.fax_file }}"
+    }
+  ]
+}

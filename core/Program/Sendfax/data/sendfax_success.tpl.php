@@ -1,0 +1,58 @@
+<?php
+$template = array();
+$template['subject'] = "Fax delivered successfully";
+$template['attachment'] = NULL;
+$template['body'] = <<<EOS
+
+<table style="margin:0px auto;border-spacing:0px;width:52%">
+<tbody>
+<tr>
+<td style="padding:20px 0px 17px 50px;" bgcolor="#333333"></td>
+</tr>
+<tr>
+<td style="border:1px solid #eeeeef; padding:35px 50px;font-size:13px;line-height:20px;font-family:Helvetica,sans-serif;">
+<p>
+
+Hi [fax:transmission:account:first_name] [fax:transmission:account:last_name],<br><br>
+
+We have successfully sent your fax. Following are the details:<br>
+
+Destination: [fax:transmission:contact:phone]<br>
+Total pages: [fax:transmission:result:pages:data]<br><br>
+Try Done: [fax:transmission:try_done]<br><br>
+
+Thank you for using [site:title].<br>
+Did you know that you can view your faxes online at [site:title]. Need Help? Visit our website!<br><br>
+
+<b>Best Regards</b></p>
+<p style="color:#666"><b>[site:title] Team</b></p>
+<p style="color:#666">[site:title] - Online Faxing </p>
+<p style="color:#666">Site : <a href="http://ictcore.org">ictcore.org</a></p>
+<br><p style="text-align:center;color:#666">ICTCore is developed by <a href="http://ictinnovations.com/">ICT Innovations</a></p>
+</td>
+</tr>
+<tr>
+<td>
+
+</td>
+</tr>
+<tr>
+<td style="background-color:rgb(57,54,51);border-collapse:collapse;background-repeat:initial initial">&nbsp;</td>
+</tr>
+</tbody>
+</table>
+EOS;
+$template['body_alt'] = <<<EOS
+Dear [transmission:account:first_name] [transmission:account:last_name],
+
+We have successfully sent your fax. Following are the details:
+
+Destination: [fax:transmission:contact:phone]
+Total pages: [fax:transmission:result:pages:data]
+Try Done: [fax:transmission:try_done]<br><br>
+
+Thanks
+-----------------------
+The [site:title] Team
+EOS;
+/* just an empty line, needed by EOS to maintain new line condition */

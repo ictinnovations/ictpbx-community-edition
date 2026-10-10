@@ -1,0 +1,21 @@
+<include>
+  <user id="{{ account.username }}" number-alias="{{ account.phone }}">
+    <params>
+      <param name="password" value="{{ account.passwd }}"/> <!--SIP password-->
+      <param name="vm-password" value="{{ account.passwd_pin }}"/>
+    </params>
+    <variables>
+      <variable name="accountcode" value="{{ account.account_id }}"/>
+      <variable name="user_context" value="user_{{ account.user_id }}"/>
+      <variable name="effective_caller_id_name" value="{{ account.caller_id_name }}"/>
+      <variable name="effective_caller_id_number" value="{{ account.phone }}"/>
+      <variable name="outbound_caller_id_name" value="{{ account.caller_id_name }}"/>
+      <variable name="outbound_caller_id_number" value="{{ account.phone }}"/>
+      <param name="t38-pass-through" value="false"/>
+      <param name="t38-fax-gateway" value="false"/>
+      <param name="fax-enable-t38" value="false"/>
+      <variable name="domain_name" value="{{account.domain}}"/>
+      <variable name="toll_allow" value="domestic,international,local"/>
+    </variables>
+  </user>
+</include>
