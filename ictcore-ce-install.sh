@@ -578,6 +578,14 @@ for CONF in conference local_stream; do
     [[ -f "$SRC" && ! -f "$DST" ]] && cp "$SRC" "$DST" && ok "${CONF}.conf.xml created"
 done
 
+# Music on Hold categories: MusicOnHold.php writes one <directory> file per category
+# into $ICTCORE_DIR/etc/freeswitch/local_stream; local_stream.conf.xml includes them.
+LS_CONF=/etc/freeswitch/autoload_configs/local_stream.conf.xml
+if [[ -f "$LS_CONF" ]] && ! grep -q 'etc/freeswitch/local_stream/' "$LS_CONF"; then
+    sed -i "s|</configuration>|\t<X-PRE-PROCESS cmd=\"include\" data=\"$ICTCORE_DIR/etc/freeswitch/local_stream/*.xml\"/>\n</configuration>|" "$LS_CONF"
+    ok "local_stream.conf.xml: includes per-category Music on Hold streams"
+fi
+
 # mod_cdr_csv → ictcore template. cdr_etl.php parses this exact 16-field layout into
 # ictfax.cdr_lega. Field 15 is ${call_direction} (the dialplan-exported business
 # direction: outbound on outbound-route legs, inbound on public DID legs) — NOT the
@@ -849,6 +857,13 @@ ok "FreeSWITCH config symlinks created"
 # Pre-create fpbx_extensions dir as ictcore so php-fpm (running as ictcore) can write XML files
 mkdir -p "$ICTCORE_DIR/etc/freeswitch/directory/fpbx_extensions"
 chown ictcore:ictcore "$ICTCORE_DIR/etc/freeswitch/directory/fpbx_extensions"
+
+# Music on Hold: stream configs written by php-fpm (ictcore), uploaded audio under the
+# setgid freeswitch:daemon storage tree (ictcore joins group daemon below).
+mkdir -p "$ICTCORE_DIR/etc/freeswitch/local_stream" /var/lib/freeswitch/storage/music_on_hold
+chown ictcore:ictcore "$ICTCORE_DIR/etc/freeswitch/local_stream"
+chown freeswitch:daemon /var/lib/freeswitch/storage/music_on_hold 2>/dev/null || true
+chmod 2775 /var/lib/freeswitch/storage/music_on_hold
 
 # Pre-create provider sip_profiles dir as ictcore so the API (php-fpm runs as ictcore)
 # can write gateway XML on trunk save; otherwise gateways silently fail to publish and
