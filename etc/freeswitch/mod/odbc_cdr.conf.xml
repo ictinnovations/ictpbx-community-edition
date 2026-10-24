@@ -1,0 +1,38 @@
+<configuration name="odbc_cdr.conf" description="ODBC CDR Configuration">
+  <settings>
+     <param name="odbc-dsn" value="ictcore:ictfaxuser:plsChangeIt"/> 
+<!--	<param name="log-leg" value="a-leg"/> -->
+    <!-- dump SQL statement after leg ends -->
+	<param name="debug-sql" value="false"/>
+  </settings>
+  <tables>
+
+
+     <table name="cdr_legb" log-leg="b-leg" > 
+      <field name="call_id" chan-var-name="call_uuid"/>
+      <field name="caller_number" chan-var-name="caller_id_number"/>
+      <field name="context" chan-var-name="context"/>
+      <field name="start_time" chan-var-name="start_stamp"/>
+      <field name="answer_time" chan-var-name="answer_stamp"/>
+      <field name="end_time" chan-var-name="end_stamp"/>
+      <field name="duration" chan-var-name="duration"/>
+      <field name="billsec" chan-var-name="billsec"/>
+      <field name="hangup_cause" chan-var-name="hangup_cause"/>
+      <field name="domain" chan-var-name="domain_name"/>
+      </table>
+      
+     <table name="cdr_lega" log-leg="a-leg" > 
+      <field name="call_id" chan-var-name="call_uuid"/>
+      <field name="destination" chan-var-name="sip_req_user"/>
+      <field name="context" chan-var-name="context"/>
+      <field name="start_time" chan-var-name="start_stamp"/>
+      <field name="answer_time" chan-var-name="answer_stamp"/>
+      <field name="end_time" chan-var-name="end_stamp"/>
+      <field name="duration" chan-var-name="duration"/>
+      <field name="billsec" chan-var-name="billsec"/>
+      <field name="hangup_cause" chan-var-name="hangup_cause"/>
+      <field name="domain" chan-var-name="domain_name"/>
+     </table>
+
+  </tables>
+</configuration>

@@ -1,0 +1,8 @@
+ALTER TABLE document MODIFY COLUMN type VARCHAR(8) NOT NULL default '';
+ALTER TABLE document MODIFY COLUMN file_name VARCHAR(128) NOT NULL default '';
+ALTER TABLE document MODIFY COLUMN file_source VARCHAR(255) NOT NULL default '';
+ALTER TABLE document MODIFY COLUMN file_name VARCHAR(128) NOT NULL default '';
+ALTER TABLE document MODIFY COLUMN name VARCHAR(128) NOT NULL default '';
+
+ALTER TABLE destination MODIFY COLUMN name VARCHAR(64) NOT NULL default '';
+ALTER TABLE template MODIFY COLUMN name VARCHAR(128) NOT NULL default '';
