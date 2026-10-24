@@ -41,6 +41,24 @@ class Internalfax
   public $created_by = NULL;
 
   /**
+   * Receiving tenant (the DID's)
+   * @var integer
+   */
+  public $tenant_id = NULL;
+
+  /**
+   * Plain pdf of the delivered fax, for the email attachment
+   * @var string
+   */
+  public $pdf_file = NULL;
+
+  /**
+   * Page count of the delivered fax
+   * @var integer
+   */
+  public $pages = 0;
+
+  /**
    * @var string
    */
   public $transmission_id = NULL;
@@ -73,6 +91,7 @@ class Internalfax
       $aprogram->account_id = $acc_id;
       $aprogram->tenant_id = $this->tenant_id;
       $aprogram->save();
+      $this->assign_to_receiver('program', 'program_id', $aprogram->program_id);
       $aprogram->deploy();
       $in_transmission = $aprogram->transmission_create($contact_id, $acc_id, Transmission::INBOUND);
       $in_transmission->status = Transmission::STATUS_COMPLETED;
@@ -95,9 +114,10 @@ class Internalfax
       $this->set_spool($in_transmission);
       $document_id = $this->internal_document();
       $this->document_id = $document_id;
+      DB::query('transmission', "UPDATE transmission SET pages = " . (int)$this->pages . " WHERE transmission_id = " . (int)$this->transmission_id);
       $oDocument = new Document($document_id);
       $this->create_spool_result($this->spool_id, 'document', $document_id);
-      $this->create_spool_result($this->spool_id, 'pages', $oDocument->pages);
+      $this->create_spool_result($this->spool_id, 'pages', $this->pages);
       // $this->send_email_notification('sendfax_faxsent');
       $this->send_email_notification_inbound($oDocument);
     }
@@ -127,32 +147,48 @@ class Internalfax
 
   public function assign_to_owner()
   {
-    if (is_null($this->created_by)) {
+    return $this->assign_to_receiver('transmission', 'transmission_id', $this->transmission_id);
+  }
+
+  /**
+   * Everything saved here is saved in the sender's session, so DB::update stamps it with the
+   * sender's tenant and user. File it under the receiver instead: the DID's tenant, and the
+   * owner of the fax account the DID is assigned to (none, rather than the sender, if unassigned).
+   */
+  private function assign_to_receiver($table, $key, $id)
+  {
+    if (empty($this->tenant_id) || empty($id)) {
       return true;
     }
-    $query = "UPDATE transmission SET created_by = " . (int)$this->created_by . " WHERE transmission_id = " . (int)$this->transmission_id;
-    return DB::query('transmission', $query);
+    $owner = is_null($this->created_by) ? 'NULL' : (int)$this->created_by;
+    return DB::query($table, "UPDATE $table SET tenant_id = " . (int)$this->tenant_id . ", created_by = $owner WHERE $key = " . (int)$id);
   }
 
   public function internal_document()
   {
-    $doc_id = Session::get_instance();
-    $Documentid = $doc_id->program->document_id;
-    // $Documentid = $this->aResource['document']->document_id;
-    //$Documentid = Session::get_instance()->document->document_id;
-    $document = new Document($Documentid);
-    $originalFile = $document->file_name;
-    $doctitle = $document->name;
-    $directory = dirname($originalFile); // Get the directory path
-    $fileName = basename($originalFile); // Get the file name
-    $newFileName = $directory . '/internal_' . $fileName; // New file name with prefix
-    if (copy($originalFile, $newFileName)) {
-      $newDocument = new Document();
-      $newDocument->name = 'Internal_Doc_' . $doctitle;
-      $newDocument->file_name = $newFileName;
-      $newDocument->save();
-      return $newDocument->document_id;
+    $oSession = Session::get_instance();
+    $document = new Document($oSession->program->document_id);
+    // Documents are encrypted with their owner's key. The file_name getter decrypts with the
+    // sender's (this session's), so turn that into a plain pdf and save the copy as the receiver:
+    // a byte copy of the sender's .aes could never be opened by the receiver.
+    $pdf_file = $document->create_pdf($document->file_name, 'tif');
+    $this->pdf_file = $pdf_file;
+    $this->pages = (int)$document->pages; // counted by the getter's tiff conversion
+    $sender = $oSession->user;
+    if (!is_null($this->created_by)) {
+      $oSession->user = new User($this->created_by);
     }
+    try {
+      $newDocument = new Document();
+      $newDocument->name = 'Internal_Doc_' . $document->name;
+      $newDocument->file_name = $pdf_file;
+      $newDocument->save();
+    } finally {
+      $oSession->user = $sender;
+    }
+    $this->assign_to_receiver('document', 'document_id', $newDocument->document_id);
+    DB::query('document', "UPDATE document SET pages = " . (int)$this->pages . " WHERE document_id = " . (int)$newDocument->document_id);
+    return $newDocument->document_id;
   }
 
   /**
@@ -247,15 +283,15 @@ class Internalfax
     $this->oTransmission->contact_id = $this->contact_id;
     $this->oTransmission->account_id = $this->account_id;
     $account = new Account($this->account_id);
-    $contact = new Contact($this->contact_id);
+    $contact = new Contact($this->contact_id, 1); // unscoped: the receiver's contact, loaded in the sender's session
     Session::get_instance()->transmission->contact->phone = $account->phone;
     Session::get_instance()->transmission->account->phone = $contact->phone;
     $oTemplate = Template::construct_from_file("Program/Faxtoemail/data/fax_internal_received.tpl.php");
     // Now replace all program related tokens in loaded template, but remember to keep missing tokens
     // Note: in template there is a attachment token, (see: token_create in transmission_done for oDocument)
     $oTemplate->token_apply($oToken, Token::KEEP_ORIGNAL);
-    // Now convert tif file into pdf
-    $oTemplate->attachment = $oDocument->create_pdf($oDocument->file_name, 'aes');
+    // The plain pdf made on delivery; the stored copy is encrypted with the receiver's key
+    $oTemplate->attachment = $this->pdf_file;
     $oTemplate->save();
 
     // prepare data for new program
@@ -275,6 +311,10 @@ class Internalfax
     );
 
     $emailTransmission = Sendemail::transmission_instant($programData, $transmissionData);
+    // The notification (and its template, which carries the fax as attachment) belongs to the receiver too
+    $this->assign_to_receiver('template', 'template_id', $oTemplate->template_id);
+    $this->assign_to_receiver('program', 'program_id', $emailTransmission->program_id);
+    $this->assign_to_receiver('transmission', 'transmission_id', $emailTransmission->transmission_id);
     $emailTransmission->task_create();
   }
 }

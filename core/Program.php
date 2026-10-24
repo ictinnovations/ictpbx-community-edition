@@ -605,22 +605,32 @@ class Program
      $destination     = isset($oSession->transmission->destination->phone) ? $oSession->transmission->destination->phone : null;
      $isMatchFound = false;
      if ($destination) {
-       $oAccount     = new Account();
-       $user_account = $oAccount->search(['type' => 'did']);
-       $query = "select * from account where phone = $destination and type= 'did'";
-       $result = DB::query('account' , $query);
+       // The receiver owns the fax: the DID's tenant, and the user of the fax account the DID
+       // is assigned to (DIDs created by an admin carry no created_by of their own).
+       $query = "SELECT d.account_id, d.tenant_id, COALESCE(fa.created_by, d.created_by) AS owner_id
+                   FROM account d
+                   LEFT JOIN account fa ON fa.linkdid_id = d.account_id AND fa.type = 'child_account'
+                  WHERE d.phone = '%phone%' AND d.type = 'did' LIMIT 1";
+       $result = DB::query('account', $query, array('phone' => $destination));
     if (mysqli_num_rows($result)) {
      $row = mysqli_fetch_assoc($result); // fetch the first row
      $account_id = $row['account_id'];
      $isMatchFound = true;
-     $contact = Contact::locate($oSession->transmission->source->phone);
-     if(!$contact){
-     $contact = new Contact();
-     $contact->phone = $oSession->transmission->source->phone;
-     $contact->save();
+     // The sender as a contact in the receiver's tenant, never another tenant's contact.
+     $source_phone = $oSession->transmission->source->phone;
+     $contact_id = null;
+     foreach (Contact::search(array('phone' => $source_phone, 'tenant_id' => $row['tenant_id'])) as $aContact) {
+       if ((string)$aContact['phone'] === (string)$source_phone) { $contact_id = $aContact['contact_id']; break; }
      }
-     $contact_id =  $contact->contact_id;
-     $oSession->internal_created_by = $row['created_by'];
+     if (!$contact_id) {
+       $contact = new Contact();
+       $contact->phone = $source_phone;
+       $contact->save();
+       $contact_id = $contact->contact_id;
+       DB::query('contact', "UPDATE contact SET tenant_id = %tid%, created_by = " . ($row['owner_id'] ? (int)$row['owner_id'] : 'NULL') . " WHERE contact_id = %cid%",
+         array('tid' => (int)$row['tenant_id'], 'cid' => (int)$contact_id));
+     }
+     $oSession->internal_created_by = $row['owner_id'];
      $oSession->internal_tenant_id = $row['tenant_id'];
     }
      } // end if($destination) DID lookup

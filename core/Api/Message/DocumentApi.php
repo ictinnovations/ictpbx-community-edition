@@ -97,9 +97,10 @@ class DocumentApi extends Api
         if ($this->get_request_method() == 'POST') { // if request is post then append, to support multiple files
           $type = pathinfo($filename, PATHINFO_EXTENSION);
           $filename = $oDocument->create_pdf($filename, $type);
+          // file_name getter already decrypts the stored .aes into a fax tiff (same as download())
           $merged_filename = $oDocument->file_name;
-          if ($oDocument->file_name) {
-            $merged_filename = $oDocument->create_pdf($oDocument->file_name, 'aes');
+          if ($merged_filename) {
+            $merged_filename = $oDocument->create_pdf($merged_filename, 'tif');
           }
           $filename = \ICT\Core\path_append($merged_filename, $filename);
         }
