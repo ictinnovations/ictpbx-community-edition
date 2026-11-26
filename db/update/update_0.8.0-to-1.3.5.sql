@@ -1,0 +1,1 @@
+ALTER TABLE usr ADD COLUMN `user_permission` varchar(256) NULL default '' AFTER `dashboard_cards`;
