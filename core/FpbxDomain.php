@@ -162,6 +162,10 @@ class FpbxDomain
     self::migrate_legacy_directory_files($pdo);
 
     $dial = '{presence_id=${dialed_user}@${dialed_domain}}${sofia_contact(*/${dialed_user}@${dialed_domain})}';
+    // allow-empty-password=false: sofia otherwise lets anyone authenticate (any password)
+    // as a user with no password -- every voicemail user (vm-password only) and any
+    // extension saved with a blank password. Voicemail lookups don't authenticate, so
+    // mod_voicemail is unaffected. CVE-2026-116779 hardening.
     $xml  = '<include>' . "\n";
     foreach ($rows as $domain_name) {
       $ext_dir = self::directory_path('fpbx_extensions', $domain_name);
@@ -174,6 +178,7 @@ class FpbxDomain
       $xml .= '  <domain name="' . $safe_name . '">' . "\n"
             . '    <params>' . "\n"
             . '      <param name="dial-string" value="' . htmlspecialchars($dial, ENT_XML1, 'UTF-8') . '"/>' . "\n"
+            . '      <param name="allow-empty-password" value="false"/>' . "\n"
             . '    </params>' . "\n"
             . '    <groups>' . "\n"
             . '      <group name="default"><users>' . "\n"

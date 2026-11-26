@@ -852,6 +852,35 @@ ok "Ownership set: ictcore:ictcore (including data/, /var/log/ictcore)"
 ln -sf "$ICTCORE_DIR/etc/freeswitch/dialplan/ictcore.xml"     /etc/freeswitch/dialplan/ictcore.xml
 ln -sf "$ICTCORE_DIR/etc/freeswitch/sip_profiles/ictcore.xml" /etc/freeswitch/sip_profiles/ictcore.xml
 ln -sf "$ICTCORE_DIR/etc/freeswitch/directory/ictcore.xml"    /etc/freeswitch/directory/ictcore.xml
+
+# CVE-2026-116779 (GHSA-mg63-h38w-8p9p, CVSS 9.8, exploited): FreeSWITCH <= 1.11.2
+# hands an inbound SIP MESSAGE whose To user is "api+<cmd>" to switch_api_execute()
+# — remote FS API / OS command execution by anyone who can get a MESSAGE accepted.
+# Our packaged 1.10.12 is affected and 1.11.3 has no EL RPMs yet, so apply the
+# vendor workaround: enable-chat=false on EVERY loaded SIP profile (webrtc, ictcore,
+# anything else in sip_profiles/). Nothing in ICTPBX uses SIP MESSAGE (SMS goes via
+# the SignalWire REST API). --follow-symlinks keeps ictcore.xml a symlink.
+for _pf in /etc/freeswitch/sip_profiles/*.xml; do
+    [[ -f "$_pf" ]] && grep -q '<settings>' "$_pf" || continue
+    if grep -q 'name="enable-chat"' "$_pf"; then
+        sed -i --follow-symlinks 's|<param name="enable-chat" value="[^"]*"/>|<param name="enable-chat" value="false"/>|' "$_pf"
+    else
+        sed -i --follow-symlinks '0,/<settings>/s|<settings>|<settings>\n    <param name="enable-chat" value="false"/>|' "$_pf"
+    fi
+    ok "$(basename "$_pf"): enable-chat=false (CVE-2026-116779)"
+done
+# Defence in depth: remove the `system`/`bg_system` API commands (global var read by
+# mod_commands) so an API-injection bug can't reach a shell directly.
+FS_VARS=/etc/freeswitch/vars.xml
+if [[ -f "$FS_VARS" ]] && ! grep -q 'disable_system_api_commands' "$FS_VARS"; then
+    sed -i 's|</include>|  <X-PRE-PROCESS cmd="set" data="disable_system_api_commands=true"/>\n</include>|' "$FS_VARS"
+    ok "vars.xml: disable_system_api_commands=true"
+fi
+# Apply to a running FS without dropping calls on other profiles (upgrade path).
+fs_cli -p "$ESL_PASS" -x 'reloadxml' >/dev/null 2>&1 || true
+for _p in webrtc ictcore; do
+    fs_cli -p "$ESL_PASS" -x "sofia profile $_p restart" >/dev/null 2>&1 || true
+done
 ok "FreeSWITCH config symlinks created"
 
 # Pre-create fpbx_extensions dir as ictcore so php-fpm (running as ictcore) can write XML files

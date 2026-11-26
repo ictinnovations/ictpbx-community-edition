@@ -10,6 +10,7 @@
   </domains>
 
   <settings>
+    <param name="enable-chat" value="false"/>
     <!--
         PORTS HAS BEEN CHANGED FOR THIS PROFILE TO AVOID CONFLICT WITH OUTHER PROFILES
     -->
